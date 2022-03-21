@@ -3,10 +3,11 @@
 #-----------------------------------------------------#  
 from bpy.types import Operator, AddonPreferences
 from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, EnumProperty
+import sys
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 0, 1),
+    "version": (1, 0, 2),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > Darrow Toolkit",
     "description": "Custom modeling tools",
@@ -24,7 +25,6 @@ modulesNames = ['ModelingTools', ]
 #-----------------------------------------------------#  
 import bpy
 from . import addon_updater_ops
-import sys
 import importlib
 
 @addon_updater_ops.make_annotations
@@ -113,7 +113,7 @@ class DarrowAddonPreferences(AddonPreferences):
     emptySize: FloatProperty(
         name="Array Empty Display Size",
         description="Size of arrays' empty",
-        default=0.1,
+        default=0.25,
         soft_min=0,
         soft_max=.5
     )
@@ -132,7 +132,7 @@ class DarrowAddonPreferences(AddonPreferences):
     removeDoublesAmount: FloatProperty(
         name="Remove Doubles Amount",
         description="Threshold to Remove Doubles",
-        default=0.02,
+        default=0.1,
         soft_min=0,
         soft_max=.25,
         precision=4
@@ -146,16 +146,17 @@ class DarrowAddonPreferences(AddonPreferences):
     def draw(self, context):
         layout = self.layout
         box = layout.box()
-        box.label(text="Default Module Properties")
+        box.label(text="Module Properties")
         box.alignment = 'RIGHT'
-        split = box.split(factor=0.4)
+        split = box.split(factor=0.7)
         box.scale_y = 1.1
         col1 = split.column(align=True)
-        col2 = split.column(align=True)
+
         col1.prop(self, "emptySize", text="Empty Display Size", slider=True)
         col1.prop(self, "removeDoublesAmount",
                   text="Remove Doubles Distance", slider=True)
-        col2.prop(self, "moveEmptyBool")
+        col1.prop(self, "moveEmptyBool", text="Move empties to 'Empty Collection'")
+
 
         addon_updater_ops.update_settings_ui(self, context)
 

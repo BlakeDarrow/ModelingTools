@@ -29,51 +29,49 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
     bl_region_type = "UI"
     bl_idname = "DARROW_PT_toolPanel"
 
-    def draw_header(self, context):
-        settings = context.preferences.addons[__package__].preferences
-        self.layout.prop(settings, 'advancedCircleBool',
-                         icon="SETTINGS", text="")
-        Var_displayBool = bpy.context.scene.vertexDisplayBool
-        Var_viewportShading = bpy.context.space_data.shading.type
-     
-        if Var_displayBool ==True:
-            self.layout.operator('set.display', icon="HIDE_OFF",
-                                 text="", depress=Var_displayBool)
-        else:
-            self.layout.operator('set.display', icon="HIDE_ON",
-                                text="", depress=Var_displayBool)
-        if Var_viewportShading != 'SOLID':
-            self.layout.enabled = False
+    #def draw_header(self, context):
+        #self.layout.label(text="", icon="MESH_DATA")
     
     def draw(self, context):
         layout = self.layout
         objs = context.selected_objects
         all = bpy.data.objects
         if len(all) != 0:
-            obj = context.active_object
-
             if context.mode == 'EDIT_MESH':
-                split = layout.box()
-                col = split.column(align=True)
+                col = self.layout.column(align=True)
                 col.scale_y = 1.33
                 col.operator('set.origin', icon="PIVOT_CURSOR")
+                cf2 = layout.box().column_flow(columns=2, align=True)
+                cf2.scale_y = 1.2
+
+                cf2.operator('view.create_orient', text="Set", icon="ADD")
+                cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
             if context.mode == 'OBJECT':
-                split = layout.box()
-                col = split.column(align=True)
-                col.scale_y = 1.33
-                col.operator('move.origin', icon="OBJECT_ORIGIN")
-                col.operator('clean.mesh', text = "Cleanup Mesh", icon="VERTEXSEL")
-                col.operator('shade.smooth', text = "Shade Smooth",icon="MOD_SMOOTH")
-                col.operator('apply.transforms', icon="CHECKMARK")
-                col.operator('apply.normals', icon="NORMALS_FACE")
+                cf = layout.box().column_flow(columns=2, align=True)
+                cf.scale_y = 1.2
+                cf.operator('move.origin', text="Origin",
+                            icon="TRANSFORM_ORIGINS")
+                cf.operator('clean.mesh', text = "Cleanup", icon="VERTEXSEL")
+                cf.operator('shade.smooth', text = "Smooth",icon="MOD_SMOOTH")
+                cf.operator('apply.transforms', text="Transforms",
+                            icon="OBJECT_ORIGIN")
+                cf.operator('apply.normals', text="Normals", icon="NORMALS_FACE")
+                cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
+
+                #col = layout.column()
+                #col.label(text="Custom Orientations", icon="ORIENTATION_GLOBAL")
+                cf2 = layout.box().column_flow(columns=2, align=True)
+                cf2.scale_y = 1.2
+
+                cf2.operator('view.create_orient', text="Set", icon="ADD")
+                cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
                 if len(objs) == 0:
-                    col.enabled = False
-
+                    cf.enabled = False
                 else:
-                    col.enabled = True
-
+                    cf.enabled = True
+           
 class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "Circular Array"
@@ -90,24 +88,6 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
             yAxis = settings.yBool
             zAxis = settings.zBool
             col = layout.column(align=True)
-
-            col.scale_y = 1.33
-            col.prop(context.scene, 'arrayAmount', slider=True)
-
-            col = layout.column(align=True)
-            col.scale_y = 1.5
-            col.operator('circle.array', icon="ONIONSKIN_ON",)
-            if xAxis == False and yAxis == False and zAxis == False:
-                col.enabled = False
-            elif len(objs) != 0:
-                col.enabled = True
-            else:
-                col.enabled = False
-            col.separator()
-
-            col = layout.column(align=True)
-
-            col.label(text="Orientation")
             row = layout.row(align=True)
             split = row.split(align=True)
             split.prop(settings, 'xBool', toggle=True)
@@ -130,25 +110,22 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
                 split.enabled = False
             if yAxis == True:
                 split.enabled = False
+            col.scale_y = 1.33
+            col.prop(context.scene, 'arrayAmount', slider=True)
 
-            col = layout.row(align=True)
-            col.scale_y = 1.2
-            
-            col.operator('view.create_orient', text="Set")
-            col.operator('clear.orientation', text="Clear")
-
-            if Var_advancedBool == True:
-                box = layout.box()
-                col2 = box.column(align=False)
-                col2.label(text="Advanced")
-                col2.scale_y = 1.2
-                col2.operator(
-                    'clear.array', text="Delete Array", icon="TRASH")
-                if len(objs) == 0:
-                    box.enabled = False
-                box.prop(settings, 'moveEmptyBool', toggle=False,
-                            text="Move empty to 'Empties'")
-
+            col = layout.column(align=True)
+            col.scale_y = 1.5
+            col.operator('circle.array', icon="ONIONSKIN_ON",)
+            col.operator(
+                'clear.array', text="Remove Array", icon="TRASH")
+        
+            if xAxis == False and yAxis == False and zAxis == False:
+                col.enabled = False
+            elif len(objs) != 0:
+                col.enabled = True
+            else:
+                col.enabled = False
+           
 class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "RGB Masking"
@@ -157,6 +134,8 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
     def draw(self, context):
         all = bpy.data.objects
         if len(all) != 0:
+            Var_displayBool = bpy.context.scene.vertexDisplayBool
+            Var_viewportShading = bpy.context.space_data.shading.type
             objs = context.selected_objects
             layout = self.layout
             split = layout.column()
@@ -176,10 +155,19 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
             if len(objs) == 0:
                 row.enabled = False
 
+            if Var_displayBool == True:
+                self.layout.operator('set.display', icon="HIDE_OFF",
+                                     text="Display RGB", depress=Var_displayBool)
+            else:
+                self.layout.operator('set.display', icon="HIDE_ON",
+                                     text="Display RGB", depress=Var_displayBool)
+            if Var_viewportShading != 'SOLID':
+                self.layout.enabled = False
+
 class createOrient(bpy.types.Operator):
     bl_idname = "view.create_orient"
     bl_label = "Set Orientation"
-    bl_description = "There is nothing here"
+    bl_description = "Set as custom transform orientation"
     bl_options = {"UNDO"}
 
     def execute(self, context):
@@ -189,7 +177,7 @@ class createOrient(bpy.types.Operator):
 class CTO_OT_Dummy(bpy.types.Operator):
     bl_idname = "object.cto_dummy"
     bl_label = ""
-    bl_description = "There is nothing here"
+    bl_description = "Remove custom orientations"
     bl_options = {"REGISTER"}
 
     @classmethod
@@ -542,7 +530,7 @@ class DarrowClearSelected(bpy.types.Operator):
 #-----------------------------------------------------#
 class DarrowClearOrientation(bpy.types.Operator):
     bl_idname = "clear.orientation"
-    bl_description = "clear.orientation"
+    bl_description = "Remove custom orientations"
     bl_label = "Cleanup"
 
     def execute(self, context):
@@ -685,10 +673,28 @@ class DarrowSmooth(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
+
+class DarrowSharp(bpy.types.Operator):
+    bl_idname = "shade.sharp"
+    bl_label = "Sharpen Object"
+    bl_description = "Sharpen the selected object"
+
+    def execute(self, context):
+        objs = context.selected_objects
+        if len(objs) != 0:
+            bpy.ops.object.shade_smooth()
+            bpy.context.object.data.use_auto_smooth = True
+            bpy.context.object.data.auto_smooth_angle = 1.15192
+
+            self.report({'INFO'}, "Object smoothed to 66")
+        else:
+            self.report({'INFO'}, "None Selected")
+        return {'FINISHED'}
+
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = (createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, CTO_OT_Dummy, DarrowClearOrientation, DarrowCleanMesh, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = (DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, CTO_OT_Dummy, DarrowClearOrientation, DarrowCleanMesh, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,)
 
 def register():
