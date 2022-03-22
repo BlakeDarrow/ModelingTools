@@ -3,11 +3,11 @@
 #-----------------------------------------------------#  
 from bpy.types import Operator, AddonPreferences
 from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, EnumProperty
-import sys
+
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 0, 2),
+    "version": (1, 0, 3),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > Darrow Toolkit",
     "description": "Custom modeling tools",
@@ -18,14 +18,20 @@ bl_info = {
 #-----------------------------------------------------#  
 #     add all new scripts to this string    
 #-----------------------------------------------------# 
-modulesNames = ['ModelingTools', ]
+
 
 #-----------------------------------------------------#  
 #     imports    
 #-----------------------------------------------------#  
 import bpy
+import sys
 from . import addon_updater_ops
 import importlib
+
+if __package__ != "modeling_tools":
+    sys.modules["modeling_tools"] = sys.modules[__package__]
+
+modulesNames = ['ModelingTools', ]
 
 @addon_updater_ops.make_annotations
 class DarrowAddonPreferences(AddonPreferences):
