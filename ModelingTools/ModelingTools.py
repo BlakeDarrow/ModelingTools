@@ -38,9 +38,15 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
         all = bpy.data.objects
         if len(all) != 0:
             if context.mode == 'EDIT_MESH':
-                col = self.layout.column(align=True)
+                layout = self.layout
+                layout.label(text="Mesh Tools") 
+                col = layout.box().column(align=True)
                 col.scale_y = 1.33
-                col.operator('set.origin', icon="PIVOT_CURSOR")
+                col.operator('set.origin', text="Set as Origin", icon="PIVOT_CURSOR")
+                layout.separator()
+
+                col = layout.column()
+                col.label(text="Custom Orientations")
                 cf2 = layout.box().column_flow(columns=2, align=True)
                 cf2.scale_y = 1.2
 
@@ -48,6 +54,9 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
             if context.mode == 'OBJECT':
+                col = layout.column(align=True)
+                col.scale_y = 1
+                col.label(text="Mesh Tools")
                 cf = layout.box().column_flow(columns=2, align=True)
                 cf.scale_y = 1.2
                 cf.operator('move.origin', text="Origin",
@@ -59,8 +68,8 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 cf.operator('apply.normals', text="Normals", icon="NORMALS_FACE")
                 cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
 
-                #col = layout.column()
-                #col.label(text="Custom Orientations", icon="ORIENTATION_GLOBAL")
+                col = layout.column()
+                col.label(text="Custom Orientations")
                 cf2 = layout.box().column_flow(columns=2, align=True)
                 cf2.scale_y = 1.2
 
@@ -171,7 +180,10 @@ class createOrient(bpy.types.Operator):
     bl_options = {"UNDO"}
 
     def execute(self, context):
-        bpy.ops.transform.create_orientation(use=True)
+        if bpy.context.active_object != None:
+            bpy.ops.transform.create_orientation(use=True)
+        else:
+            self.report({'WARNING'},"Selection cannot be empty")
         return {'FINISHED'}
 
 class CTO_OT_Dummy(bpy.types.Operator):
