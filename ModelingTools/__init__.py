@@ -7,7 +7,7 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, 
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 0, 3),
+    "version": (1, 0, 4),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > Darrow Toolkit",
     "description": "Custom modeling tools",
@@ -138,10 +138,10 @@ class DarrowAddonPreferences(AddonPreferences):
     removeDoublesAmount: FloatProperty(
         name="Remove Doubles Amount",
         description="Threshold to Remove Doubles",
-        default=0.1,
+        default=0.01,
         soft_min=0,
         soft_max=.25,
-        precision=4
+        precision=3
     )
     moveEmptyBool: BoolProperty(
         name="Create CircleArray empties under 'Darrow_Empties'.",

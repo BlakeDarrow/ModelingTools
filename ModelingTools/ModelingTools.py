@@ -38,9 +38,15 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
         all = bpy.data.objects
         if len(all) != 0:
             if context.mode == 'EDIT_MESH':
-                col = self.layout.column(align=True)
+                layout = self.layout
+                layout.label(text="Mesh Tools") 
+                col = layout.box().column(align=True)
                 col.scale_y = 1.33
-                col.operator('set.origin', icon="PIVOT_CURSOR")
+                col.operator('set.origin', text="Set as Origin", icon="PIVOT_CURSOR")
+                layout.separator()
+
+                col = layout.column()
+                col.label(text="Custom Orientations")
                 cf2 = layout.box().column_flow(columns=2, align=True)
                 cf2.scale_y = 1.2
 
@@ -48,19 +54,22 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
             if context.mode == 'OBJECT':
+                col = layout.column(align=True)
+                col.scale_y = 1
+                col.label(text="Mesh Tools")
                 cf = layout.box().column_flow(columns=2, align=True)
                 cf.scale_y = 1.2
                 cf.operator('move.origin', text="Origin",
                             icon="TRANSFORM_ORIGINS")
-                cf.operator('clean.mesh', text = "Cleanup", icon="VERTEXSEL")
+                cf.operator('cleanup.mesh', text = "Cleanup", icon="VERTEXSEL")
                 cf.operator('shade.smooth', text = "Smooth",icon="MOD_SMOOTH")
                 cf.operator('apply.transforms', text="Transforms",
                             icon="OBJECT_ORIGIN")
                 cf.operator('apply.normals', text="Normals", icon="NORMALS_FACE")
                 cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
 
-                #col = layout.column()
-                #col.label(text="Custom Orientations", icon="ORIENTATION_GLOBAL")
+                col = layout.column()
+                col.label(text="Custom Orientations")
                 cf2 = layout.box().column_flow(columns=2, align=True)
                 cf2.scale_y = 1.2
 
@@ -125,8 +134,33 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
                 col.enabled = True
             else:
                 col.enabled = False
+                
+            if context.mode != 'OBJECT':
+                col.enabled = False
            
 class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_label = "Cleanup Mesh"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        all = bpy.data.objects
+        objs = context.selected_objects
+        if len(all) != 0:
+            settings = context.preferences.addons[__package__].preferences
+            layout = self.layout
+            scn = context.scene
+            col = layout.column(align=False)
+            col.scale_y = 1.33
+            col.prop(settings, "removeDoublesAmount", text="Merge Distance",slider=True)
+            col = layout.column(align=True)
+            col.scale_y = 1.33
+            col.operator("cleanup.mesh", text="Cleanup", icon= "VERTEXSEL")
+            col.prop(scn, "fixNgons", text="Fix Ngons", toggle=True, icon="MOD_DECIM")
+            if len(objs) == 0:
+                col.enabled = False
+
+class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "RGB Masking"
     bl_options = {'DEFAULT_CLOSED'}
@@ -137,9 +171,11 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
             Var_displayBool = bpy.context.scene.vertexDisplayBool
             Var_viewportShading = bpy.context.space_data.shading.type
             objs = context.selected_objects
-            layout = self.layout
+            layout = self.layout    
             split = layout.column()
             row = split.row(align=True)
+            col = layout.column()
+            col.scale_y = 1.33
             row.scale_y = 1.1
             row.operator('set.black')
             row.operator('set.white')
@@ -156,13 +192,54 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
                 row.enabled = False
 
             if Var_displayBool == True:
-                self.layout.operator('set.display', icon="HIDE_OFF",
-                                     text="Display RGB", depress=Var_displayBool)
+                col.operator('set.display', icon="HIDE_OFF",
+                                     text="Display Color", depress=Var_displayBool)
             else:
-                self.layout.operator('set.display', icon="HIDE_ON",
-                                     text="Display RGB", depress=Var_displayBool)
+                col.operator('set.display', icon="HIDE_ON",
+                                     text="Display Color", depress=Var_displayBool)
             if Var_viewportShading != 'SOLID':
-                self.layout.enabled = False
+                col.enabled = False
+
+#-----------------------------------------------------#
+#    Cleanup Mesh
+#-----------------------------------------------------#
+class DarrowCleanupMesh(bpy.types.Operator):
+    bl_label = "Example"
+    bl_idname = "cleanup.mesh"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Attempt to clean mesh"
+
+    def execute(self, context):
+        objs = bpy.context.selected_objects
+        settings = context.preferences.addons[__package__].preferences
+
+        if len(objs) == 1:
+            if context.mode != "EDIT_MESH":
+                    bpy.ops.object.editmode_toggle()
+            DarrowCleanupMesh.cleanVertices(self,context) # Call other function within this same class
+            bpy.ops.object.editmode_toggle()
+            self.report({'INFO'}, "Cleaned selected mesh")
+            
+        elif len(objs) > 1:
+            self.report({'ERROR'}, "Please select only one mesh")
+    
+        elif len(objs) == 0:
+            self.report({'ERROR'}, "Please select a mesh")
+           
+        return {'FINISHED'}
+    
+    def cleanVertices(self,context):
+        settings = context.preferences.addons[__package__].preferences
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='VERT')
+        bpy.ops.mesh.remove_doubles(threshold= settings.removeDoublesAmount)
+        if bpy.context.scene.fixNgons == True:
+            DarrowCleanupMesh.cleanNgons()
+        bpy.ops.mesh.delete_loose()
+         
+    def cleanNgons():
+        bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
+        bpy.ops.mesh.tris_convert_to_quads()
 
 class createOrient(bpy.types.Operator):
     bl_idname = "view.create_orient"
@@ -171,7 +248,10 @@ class createOrient(bpy.types.Operator):
     bl_options = {"UNDO"}
 
     def execute(self, context):
-        bpy.ops.transform.create_orientation(use=True)
+        if bpy.context.active_object != None:
+            bpy.ops.transform.create_orientation(use=True)
+        else:
+            self.report({'WARNING'},"Selection cannot be empty")
         return {'FINISHED'}
 
 class CTO_OT_Dummy(bpy.types.Operator):
@@ -346,11 +426,6 @@ class DarrowCircleArray(bpy.types.Operator):
         if collectionFound == False:
             col = bpy.data.collections.new(empty_collection_name)
             bpy.context.scene.collection.children.link(col)
-            try:
-                vlayer = bpy.context.scene.view_layers["View Layer"]
-            except:
-                vlayer = bpy.context.scene.view_layers["ViewLayer"]
-            vlayer.layer_collection.children[empty_collection_name].hide_viewport = True
             bpy.data.collections[empty_collection_name].color_tag = 'COLOR_01'
 
         else:
@@ -377,11 +452,6 @@ class DarrowCircleArray(bpy.types.Operator):
 
         else:
             print("Array exists")
-            try:
-                vlayer = bpy.context.scene.view_layers["View Layer"]
-            except:
-                vlayer = bpy.context.scene.view_layers["ViewLayer"]
-            vlayer.layer_collection.children[empty_collection_name].hide_viewport = False
             bpy.data.collections[empty_collection_name].color_tag = 'COLOR_01'
             empty = bpy.data.objects[context.object.linkedEmpty]
 
@@ -468,11 +538,6 @@ class DarrowCircleArray(bpy.types.Operator):
                 coll.objects.unlink(empty)
             context.scene.collection.objects.link(empty)
 
-        try:
-            vlayer = bpy.context.scene.view_layers["View Layer"]
-        except:
-            vlayer = bpy.context.scene.view_layers["ViewLayer"]
-        vlayer.layer_collection.children[empty_collection_name].hide_viewport = True
         empty.select_set(state=False)
         selected.select_set(state=True)
         context.view_layer.objects.active = selected
@@ -547,31 +612,6 @@ class DarrowClearOrientation(bpy.types.Operator):
                     pass
         return {'FINISHED'}
   
-#-----------------------------------------------------#  
-#    handles mesh clean up
-#-----------------------------------------------------#  
-class DarrowCleanMesh(bpy.types.Operator):
-    bl_idname = "clean.mesh"
-    bl_description = "Delete loose, remove doubles, and dissolve degenerate"
-    bl_label = "Clean Mesh"
-
-    def execute(self, context):
-        settings = context.preferences.addons[__package__].preferences
-        objs = context.selected_objects
-        if len(objs) != 0: 
-            if context.mode == 'OBJECT':
-                bpy.ops.object.editmode_toggle()
-
-            bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='VERT')
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.delete_loose()
-            bpy.ops.mesh.remove_doubles(threshold=settings.removeDoublesAmount)
-            bpy.ops.mesh.dissolve_degenerate()
-            bpy.ops.object.editmode_toggle()   
-            self.report({'INFO'}, "Mesh cleaned")
-        else:
-            self.report({'INFO'}, "None Selected")
-        return {'FINISHED'}
 
 #-----------------------------------------------------#  
 #    handle apply transforms
@@ -692,9 +732,35 @@ class DarrowSharp(bpy.types.Operator):
         return {'FINISHED'}
 
 #-----------------------------------------------------#  
+#    handles mesh clean up
+#-----------------------------------------------------#  
+# class DarrowCleanMesh(bpy.types.Operator):
+#     bl_idname = "clean.mesh"
+#     bl_description = "Delete loose, remove doubles, and dissolve degenerate"
+#     bl_label = "Clean Mesh"
+
+#     def execute(self, context):
+#         settings = context.preferences.addons[__package__].preferences
+#         objs = context.selected_objects
+#         if len(objs) != 0: 
+#             if context.mode == 'OBJECT':
+#                 bpy.ops.object.editmode_toggle()
+
+#             bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='VERT')
+#             bpy.ops.mesh.select_all(action='SELECT')
+#             bpy.ops.mesh.delete_loose()
+#             bpy.ops.mesh.remove_doubles(threshold=settings.removeDoublesAmount)
+#             bpy.ops.mesh.dissolve_degenerate()
+#             bpy.ops.object.editmode_toggle()   
+#             self.report({'INFO'}, "Mesh cleaned")
+#         else:
+#             self.report({'INFO'}, "None Selected")
+#         return {'FINISHED'}
+
+#-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = (DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, CTO_OT_Dummy, DarrowClearOrientation, DarrowCleanMesh, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,)
 
 def register():
@@ -738,6 +804,19 @@ def register():
         step=1,
         soft_max=30,
         soft_min=1,
+    )
+    bpy.types.Scene.mergeFloat = bpy.props.FloatProperty(
+        name = "Int",
+        default = 0.02,
+        soft_min = 0.00001,
+        soft_max = 0.5,
+        step = 0.1,
+
+    )
+    
+    bpy.types.Scene.fixNgons = bpy.props.BoolProperty(
+        name = "Tris to quads",
+        default = True
     )
 
 def unregister():
