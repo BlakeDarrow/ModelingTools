@@ -39,7 +39,7 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
         if len(all) != 0:
             if context.mode == 'EDIT_MESH':
                 layout = self.layout
-                layout.label(text="Mesh Tools") 
+                layout.label(text="Mesh Tools")
                 col = layout.box().column(align=True)
                 col.scale_y = 1.33
                 col.operator('set.origin', text="Set as Origin", icon="PIVOT_CURSOR")
@@ -65,23 +65,28 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 cf.operator('shade.smooth', text = "Smooth",icon="MOD_SMOOTH")
                 cf.operator('apply.transforms', text="Transforms",
                             icon="OBJECT_ORIGIN")
-                cf.operator('apply.normals', text="Normals", icon="NORMALS_FACE")
+                cf.operator('apply.normals', text="Normals", icon="ORIENTATION_NORMAL")
                 cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
-
-                col = layout.column()
-                col.label(text="Custom Orientations")
-                cf2 = layout.box().column_flow(columns=2, align=True)
-                cf2.scale_y = 1.2
-
-                cf2.operator('view.create_orient', text="Set", icon="ADD")
-                cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
                 if len(objs) == 0:
                     cf.enabled = False
                 else:
                     cf.enabled = True
-           
+
 class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_label = "Transform Orientations"
+    bl_options = {'HEADER_LAYOUT_EXPAND'}
+
+    def draw(self, context):
+        layout = self.layout
+        cf2 = layout.column_flow(columns=2, align=True)
+        cf2.scale_y = 1.33
+
+        cf2.operator('view.create_orient', text="Set", icon="RESTRICT_SELECT_OFF")
+        cf2.operator('clear.orientation', text="Clear", icon="TRASH")
+
+class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "Circular Array"
     bl_options = {'DEFAULT_CLOSED'}
@@ -90,7 +95,6 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
         all = bpy.data.objects
         if len(all) != 0:
             settings = context.preferences.addons[__package__].preferences
-            Var_advancedBool = settings.advancedCircleBool
             layout = self.layout
             objs = context.selected_objects
             xAxis = settings.xBool
@@ -138,7 +142,7 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
             if context.mode != 'OBJECT':
                 col.enabled = False
            
-class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
+class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "Cleanup Mesh"
     bl_options = {'DEFAULT_CLOSED'}
@@ -160,7 +164,7 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
             if len(objs) == 0:
                 col.enabled = False
 
-class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
+class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
     bl_label = "RGB Masking"
     bl_options = {'DEFAULT_CLOSED'}
@@ -760,7 +764,7 @@ class DarrowSharp(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,)
 
 def register():
