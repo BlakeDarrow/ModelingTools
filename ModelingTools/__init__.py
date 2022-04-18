@@ -9,7 +9,7 @@ bl_info = {
     "author": "Blake Darrow",
     "version": (1, 0, 6),
     "blender": (3, 0, 0),
-    "location": "View3D > Sidebar > Darrow Toolkit",
+    "location": "View3D > Sidebar > DarrowTools",
     "description": "Custom modeling tools",
     "category": "Tools",
     "wiki_url": "https://docs.darrow.tools/en/latest/index.html",
