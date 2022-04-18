@@ -24,7 +24,7 @@ class DarrowToolPanel:
 
 class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
     bl_label = "Modeling Tools"
-    bl_category = "DarrowToolkit"
+    bl_category = "DarrowTools"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_idname = "DARROW_PT_toolPanel"
@@ -43,15 +43,6 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 col = layout.box().column(align=True)
                 col.scale_y = 1.33
                 col.operator('set.origin', text="Set as Origin", icon="PIVOT_CURSOR")
-                layout.separator()
-
-                col = layout.column()
-                col.label(text="Custom Orientations")
-                cf2 = layout.box().column_flow(columns=2, align=True)
-                cf2.scale_y = 1.2
-
-                cf2.operator('view.create_orient', text="Set", icon="ADD")
-                cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
             if context.mode == 'OBJECT':
                 col = layout.column(align=True)
