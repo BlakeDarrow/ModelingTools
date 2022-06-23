@@ -78,8 +78,16 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 else:
                     cf.enabled = True
 
-class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
+class DARROW_PT_toolExtendPanel(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
+    bl_label = "More Tools"
+    bl_options = {'HEADER_LAYOUT_EXPAND'}
+
+    def draw(self, context):
+       layout = self.layout()
+
+class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Transform Orientations"
     bl_options = {'HEADER_LAYOUT_EXPAND'}
 
@@ -92,7 +100,7 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
         cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
 class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
-    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Circular Array"
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -148,7 +156,7 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
                 col.enabled = False
            
 class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
-    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Cleanup Mesh"
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -170,7 +178,7 @@ class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
                 col.enabled = False
 
 class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
-    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "RGB Masking"
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -210,7 +218,7 @@ class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
                 col.enabled = False
 
 class DARROW_PT_toolPanel_6(DarrowToolPanel, bpy.types.Panel):
-    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Quick Unwrap"
     bl_options = {'DEFAULT_CLOSED'}
 
@@ -798,7 +806,7 @@ class DarrowUnwrapSelected(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected)
 
 def register():
