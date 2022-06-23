@@ -1,9 +1,22 @@
-#-----------------------------------------------------#  
+# ##### BEGIN GPL LICENSE BLOCK #####
 #
-#    Copyright (c) 2022 Blake Darrow <contact@blakedarrow.com>
+#   Copyright (C) 2022  Blake Darrow <contact@blakedarrow.com>
 #
-#    See the LICENSE file for your full rights.
+#   This program is free software: you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation, either version 3 of the License, or
+#   (at your option) any later version.
 #
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+# ##### END GPL LICENSE BLOCK #####
+
 #-----------------------------------------------------#  
 #   Imports
 #-----------------------------------------------------# 
@@ -54,6 +67,7 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                             icon="TRANSFORM_ORIGINS")
                 cf.operator('cleanup.mesh', text = "Cleanup", icon="VERTEXSEL")
                 cf.operator('shade.smooth', text = "Smooth",icon="MOD_SMOOTH")
+                cf.operator("unwrap.selected", text="Unwrap", icon="UV")
                 cf.operator('apply.transforms', text="Transforms",
                             icon="OBJECT_ORIGIN")
                 cf.operator('apply.normals', text="Normals", icon="ORIENTATION_NORMAL")
@@ -194,6 +208,21 @@ class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
                                      text="Display Color", depress=Var_displayBool)
             if Var_viewportShading != 'SOLID':
                 col.enabled = False
+
+class DARROW_PT_toolPanel_6(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolPanel"
+    bl_label = "Quick Unwrap"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        all = bpy.data.objects
+        if len(all) != 0:
+            layout = self.layout
+            scn = context.scene
+            col = layout.column(align=True)
+            col.scale_y = 1.2
+            col.operator("unwrap.selected", text="Unwrap All Selection", icon="UV")
+            col.prop(scn, "unwrapFloat", text="Angle")
 
 #-----------------------------------------------------#
 #    Cleanup Mesh
@@ -607,23 +636,20 @@ class DarrowClearOrientation(bpy.types.Operator):
                     pass
         return {'FINISHED'}
   
-
 #-----------------------------------------------------#  
 #    handle apply transforms
 #-----------------------------------------------------#  
 class DarrowTransforms(bpy.types.Operator):
     bl_idname = "apply.transforms"
     bl_description = "Apply transformations to selected object"
-    bl_label = "Apply Transforms"
+    bl_label = "Apply Rot & Scale"
     bl_options = {"UNDO"}
 
     def execute(self, context):
         objs = context.selected_objects
         if len(objs) != 0: 
-            bpy.ops.view3d.snap_cursor_to_selected()
             bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=True)
-            bpy.ops.object.transform_apply(location=True,rotation=True, scale=True)
-            bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+            bpy.ops.object.transform_apply(location=False,rotation=True, scale=True)
             self.report({'INFO'}, "Transforms applied")
         else:
             self.report({'INFO'}, "None Selected")
@@ -708,7 +734,6 @@ class DarrowSmooth(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-
 class DarrowSharp(bpy.types.Operator):
     bl_idname = "shade.sharp"
     bl_label = "Sharpen Object"
@@ -726,41 +751,64 @@ class DarrowSharp(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-#-----------------------------------------------------#  
-#    handles mesh clean up
-#-----------------------------------------------------#  
-# class DarrowCleanMesh(bpy.types.Operator):
-#     bl_idname = "clean.mesh"
-#     bl_description = "Delete loose, remove doubles, and dissolve degenerate"
-#     bl_label = "Clean Mesh"
+#-----------------------------------------------------#
+#    Quick Unwrap
+#-----------------------------------------------------#
+class DarrowUnwrapSelected(bpy.types.Operator):
+    bl_label = "Example"
+    bl_idname = "unwrap.selected"
+    bl_options = {'REGISTER', 'UNDO'}
 
-#     def execute(self, context):
-#         settings = context.preferences.addons[__package__].preferences
-#         objs = context.selected_objects
-#         if len(objs) != 0: 
-#             if context.mode == 'OBJECT':
-#                 bpy.ops.object.editmode_toggle()
-
-#             bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='VERT')
-#             bpy.ops.mesh.select_all(action='SELECT')
-#             bpy.ops.mesh.delete_loose()
-#             bpy.ops.mesh.remove_doubles(threshold=settings.removeDoublesAmount)
-#             bpy.ops.mesh.dissolve_degenerate()
-#             bpy.ops.object.editmode_toggle()   
-#             self.report({'INFO'}, "Mesh cleaned")
-#         else:
-#             self.report({'INFO'}, "None Selected")
-#         return {'FINISHED'}
-
+    def execute(self, context):
+        scn = bpy.data.objects
+        selection = bpy.context.selected_objects
+        active_object = bpy.context.active_object
+        angle = math.radians(bpy.context.scene.unwrapFloat)
+        
+        if context.mode == 'OBJECT':
+            bpy.ops.object.select_all(action='DESELECT')
+        else:
+            bpy.ops.mesh.select_all(action='DESELECT')
+        
+        for i in selection:
+            i.select_set(True)
+            bpy.context.view_layer.objects.active = i
+            
+            if context.mode == 'OBJECT':
+                bpy.ops.object.editmode_toggle()
+            
+            bpy.ops.mesh.select_all(action='SELECT')
+            
+            bpy.ops.uv.smart_project(
+                angle_limit=angle,
+                island_margin=0.0, 
+                area_weight=0.0, 
+                correct_aspect=True,
+                scale_to_bounds=False)
+                
+            bpy.ops.object.editmode_toggle()
+            
+            i.select_set(False)
+                
+        amt = len(selection)
+        for i in selection:
+            i.select_set(True)
+        self.report({'INFO'}, "Unwrapped " + str(amt) + " at " + str(bpy.context.scene.unwrapFloat) + " angle")
+        return {'FINISHED'}
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
-           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,)
+classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,  DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected)
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+
+    bpy.types.Scene.unwrapFloat = bpy.props.FloatProperty(
+        name = "Int",
+        default = 66,
+    )
 
     bpy.types.Scene.vertexDisplayBool = bpy.props.BoolProperty(
         name="",
