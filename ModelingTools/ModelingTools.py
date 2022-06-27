@@ -230,7 +230,7 @@ class DARROW_PT_toolPanel_6(DarrowToolPanel, bpy.types.Panel):
             scn = context.scene
             col = layout.column(align=True)
             col.scale_y = 1.2
-            col.operator("unwrap.selected", text="Unwrap All Selection", icon="UV")
+            col.operator("unwrap.selected", text="Unwrap All Selected", icon="UV")
             col.prop(scn, "unwrapFloat", text="Angle")
 
 #-----------------------------------------------------#
@@ -577,9 +577,6 @@ class DarrowCircleArray(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     handles array
-#-----------------------------------------------------#
 class DarrowClearSelected(bpy.types.Operator):
     bl_idname = "clear.array"
     bl_description = "Move selected to world origin"
