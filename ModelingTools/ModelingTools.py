@@ -84,7 +84,8 @@ class DARROW_PT_toolExtendPanel(DarrowToolPanel, bpy.types.Panel):
     bl_options = {'HEADER_LAYOUT_EXPAND'}
 
     def draw(self, context):
-       layout = self.layout()
+        none = None
+
 
 class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
@@ -765,6 +766,7 @@ class DarrowSharp(bpy.types.Operator):
 class DarrowUnwrapSelected(bpy.types.Operator):
     bl_label = "Example"
     bl_idname = "unwrap.selected"
+    bl_description = "Unwrap all selection"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -867,7 +869,7 @@ def register():
     
     bpy.types.Scene.fixNgons = bpy.props.BoolProperty(
         name = "Tris to quads",
-        default = True
+        default = False
     )
 
 def unregister():
