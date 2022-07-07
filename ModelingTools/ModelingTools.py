@@ -72,6 +72,7 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                             icon="OBJECT_ORIGIN")
                 cf.operator('apply.normals', text="Normals", icon="ORIENTATION_NORMAL")
                 cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
+                cf.operator('darrow.move_on_grid', text="Align", icon="MOD_LATTICE")
 
                 if len(objs) == 0:
                     cf.enabled = False
@@ -80,25 +81,32 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
 
 class DARROW_PT_toolExtendPanel(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
-    bl_label = "More Tools"
-    bl_options = {'HEADER_LAYOUT_EXPAND'}
+    bl_label = "Tools and Options"
+    bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         none = None
 
-
 class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
-    bl_label = "Transform Orientations"
-    bl_options = {'HEADER_LAYOUT_EXPAND'}
+    bl_label = "Align on Grid"
+    bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
-        layout = self.layout
-        cf2 = layout.column_flow(columns=2, align=True)
-        cf2.scale_y = 1.33
+        all = bpy.data.objects
+        if len(all) != 0:
+            layout = self.layout
+            scn = context.scene
+            col = layout.column(align=True)
+            col.scale_y = 1.33
 
-        cf2.operator('view.create_orient', text="Set", icon="RESTRICT_SELECT_OFF")
-        cf2.operator('clear.orientation', text="Clear", icon="TRASH")
+            btn = col.row(align = True)
+            btn.scale_y = 1.5
+            btn.operator("darrow.move_on_grid", text="Align on grid", icon="MOD_LATTICE")
+            col.separator()
+            col.prop(scn, "alignGridRows", text="Row Amount", slider = True)
+            col.prop(scn, "alignGridSpacing", text="Object Padding", slider = True)
+            col.prop(scn, "alignGridHeight", text="Grid Height", slider = True)
 
 class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
@@ -155,28 +163,21 @@ class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
                 
             if context.mode != 'OBJECT':
                 col.enabled = False
-           
+
 class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
-    bl_label = "Cleanup Mesh"
+    bl_label = "Quick Unwrap"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         all = bpy.data.objects
-        objs = context.selected_objects
         if len(all) != 0:
-            settings = context.preferences.addons[__package__].preferences
             layout = self.layout
             scn = context.scene
-            col = layout.column(align=False)
-            col.scale_y = 1.33
-            col.prop(settings, "removeDoublesAmount", text="Merge Distance",slider=True)
             col = layout.column(align=True)
-            col.scale_y = 1.33
-            col.operator("cleanup.mesh", text="Cleanup", icon= "VERTEXSEL")
-            col.prop(scn, "fixNgons", text="Fix Ngons", toggle=True, icon="MOD_DECIM")
-            if len(objs) == 0:
-                col.enabled = False
+            col.scale_y = 1.2
+            col.operator("unwrap.selected", text="Unwrap All Selected", icon="UV")
+            col.prop(scn, "unwrapFloat", text="Angle")
 
 class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
@@ -220,18 +221,74 @@ class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
 
 class DARROW_PT_toolPanel_6(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
-    bl_label = "Quick Unwrap"
+    bl_label = "Cleanup Mesh"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         all = bpy.data.objects
+        objs = context.selected_objects
         if len(all) != 0:
+            settings = context.preferences.addons[__package__].preferences
             layout = self.layout
             scn = context.scene
+            col = layout.column(align=False)
+            col.scale_y = 1.33
+            col.prop(settings, "removeDoublesAmount", text="Merge Distance",slider=True)
             col = layout.column(align=True)
-            col.scale_y = 1.2
-            col.operator("unwrap.selected", text="Unwrap All Selected", icon="UV")
-            col.prop(scn, "unwrapFloat", text="Angle")
+            col.scale_y = 1.33
+            col.operator("cleanup.mesh", text="Cleanup", icon= "VERTEXSEL")
+            col.prop(scn, "fixNgons", text="Fix Ngons", toggle=True, icon="MOD_DECIM")
+            if len(objs) == 0:
+                col.enabled = False
+
+class DARROW_PT_toolPanel_7(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
+    bl_label = "Orientations"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        cf2 = layout.column_flow(columns=2, align=True)
+        cf2.scale_y = 1.33
+
+        cf2.operator('view.create_orient', text="Set", icon="RESTRICT_SELECT_OFF")
+        cf2.operator('clear.orientation', text="Clear", icon="TRASH")
+
+#-----------------------------------------------------#
+#    Grid 
+#-----------------------------------------------------#
+class DarrowMoveOnGrid(bpy.types.Operator):
+    bl_label = "Align on grid"
+    bl_idname = "darrow.move_on_grid"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Align selected objects on a grid"
+
+    def execute(self,context):
+        zHeight=bpy.context.scene.alignGridHeight
+        spacing= bpy.context.scene.alignGridSpacing
+    
+        objs_sel = bpy.context.selected_objects
+
+        gridSizeY = bpy.context.scene.alignGridRows
+        gridSizeX = int(math.ceil(len(objs_sel) / gridSizeY))
+
+        xPosArray = []
+        yPosArray = []
+        
+        for xi in range(0, gridSizeX):
+            for yi in range(0, gridSizeY):
+                xPos=-(gridSizeX-1)*spacing/2.0+xi*spacing
+                yPos=-(gridSizeY-1)*spacing/2.0+yi*spacing
+
+                xPosArray.append(xPos)
+                yPosArray.append(yPos)
+
+        i = -1
+        for obj in objs_sel:
+            i = i +1
+            obj.location = (xPosArray[i], yPosArray[i], zHeight)
+
+        return {'FINISHED'}
 
 #-----------------------------------------------------#
 #    Cleanup Mesh
@@ -652,10 +709,25 @@ class DarrowTransforms(bpy.types.Operator):
     bl_options = {"UNDO"}
 
     def execute(self, context):
+
         objs = context.selected_objects
         if len(objs) != 0: 
-            bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=True)
-            bpy.ops.object.transform_apply(location=False,rotation=True, scale=True)
+            active = bpy.context.view_layer.objects.active
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = None
+
+            for obj in objs:
+                obj.select_set(state=True)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.make_single_user(object=True, obdata=True, material=False, animation=True)
+                bpy.ops.object.transform_apply(location=False,rotation=True, scale=True)
+                obj.select_set(state=False)
+            
+            for obj in objs:
+                obj.select_set(True)
+
+            bpy.context.view_layer.objects.active = active
+
             self.report({'INFO'}, "Transforms applied")
         else:
             self.report({'INFO'}, "None Selected")
@@ -674,9 +746,16 @@ class DarrowSetOrigin(bpy.types.Operator):
         if len(objs) != 0: 
             if context.mode == 'OBJECT':
                 bpy.ops.object.editmode_toggle()
+
+            x, y, z = bpy.context.scene.cursor.location.x,  bpy.context.scene.cursor.location.y, bpy.context.scene.cursor.location.z
+            print(bpy.context.scene.cursor.location.x)
+
             bpy.ops.view3d.snap_cursor_to_selected()
             bpy.ops.object.editmode_toggle()
             bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+
+            bpy.context.scene.cursor.location = (x,y,z)
+
             self.report({'INFO'}, "Selected is now origin")
         else:
             self.report({'INFO'}, "None Selected")
@@ -693,8 +772,11 @@ class DarrowMoveOrigin(bpy.types.Operator):
     def execute(self, context):
         objs = context.selected_objects
         if len(objs) != 0: 
+
+            x, y, z = bpy.context.scene.cursor.location.x,  bpy.context.scene.cursor.location.y, bpy.context.scene.cursor.location.z
             bpy.ops.view3d.snap_cursor_to_center()
             bpy.ops.view3d.snap_selected_to_cursor(use_offset=False)
+            bpy.context.scene.cursor.location = (x,y,z)
             self.report({'INFO'}, "Moved selected to object origin")
         else:
             self.report({'INFO'}, "None Selected")
@@ -709,13 +791,30 @@ class DarrowNormals(bpy.types.Operator):
     bl_label = "Calculate Normals"
 
     def execute(self, context):
-        objs = context.selected_objects
+        objs = bpy.context.selected_objects
+        active = bpy.context.view_layer.objects.active
+
         if len(objs) != 0: 
-            bpy.ops.object.editmode_toggle()
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.normals_make_consistent(inside=False)
-            bpy.ops.object.editmode_toggle()
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = None
+
+            for obj in objs:
+                obj.select_set(state=True)
+                bpy.context.view_layer.objects.active = obj
+
+                bpy.ops.object.editmode_toggle()
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.normals_make_consistent(inside=False)
+                bpy.ops.object.editmode_toggle()
+                obj.select_set(state=False)
+
+            for obj in objs:
+                obj.select_set(True)
+
+            bpy.context.view_layer.objects.active = active
+
             self.report({'INFO'}, "Normals calculated outside")
+
         else:
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
@@ -731,10 +830,22 @@ class DarrowSmooth(bpy.types.Operator):
     def execute(self, context):
         objs = context.selected_objects
         if len(objs) != 0: 
-            bpy.ops.object.shade_smooth()
-            bpy.context.object.data.use_auto_smooth = True
-            bpy.context.object.data.auto_smooth_angle = 3.14159
+            active = bpy.context.view_layer.objects.active
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = None
 
+            for obj in objs:
+                obj.select_set(state=True)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.shade_smooth()
+                bpy.context.object.data.use_auto_smooth = True
+                bpy.context.object.data.auto_smooth_angle = 3.14159
+                obj.select_set(state=False)
+            
+            for obj in objs:
+                obj.select_set(True)
+
+            bpy.context.view_layer.objects.active = active
             self.report({'INFO'}, "Object smoothed to 180")
         else:
             self.report({'INFO'}, "None Selected")
@@ -748,9 +859,22 @@ class DarrowSharp(bpy.types.Operator):
     def execute(self, context):
         objs = context.selected_objects
         if len(objs) != 0:
-            bpy.ops.object.shade_smooth()
-            bpy.context.object.data.use_auto_smooth = True
-            bpy.context.object.data.auto_smooth_angle = 1.15192
+            bpy.ops.object.select_all(action='DESELECT')
+            active = bpy.context.view_layer.objects.active
+            bpy.context.view_layer.objects.active = None
+
+            for obj in objs:
+                obj.select_set(state=True)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.shade_smooth()
+                bpy.context.object.data.use_auto_smooth = True
+                bpy.context.object.data.auto_smooth_angle = 1.15192
+                obj.select_set(state=False)
+
+            for obj in objs:
+                obj.select_set(True)
+
+            bpy.context.view_layer.objects.active = active
 
             self.report({'INFO'}, "Object smoothed to 66")
         else:
@@ -805,12 +929,36 @@ class DarrowUnwrapSelected(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
-           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected)
+classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected,DarrowMoveOnGrid)
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+
+    bpy.types.Scene.alignGridSpacing = bpy.props.IntProperty(
+        name = "Padding",
+        default=1,
+        step=1,
+        soft_max=50,
+        soft_min=1
+    )
+
+    bpy.types.Scene.alignGridHeight = bpy.props.IntProperty(
+        name = "Grid Height",
+        default=0,
+        step=1,
+        soft_max=50,
+        soft_min=0,
+    )
+
+    bpy.types.Scene.alignGridRows = bpy.props.IntProperty(
+        name = "Rows",
+        default=2,
+        step=1,
+        soft_max=10,
+        soft_min=1
+    )
 
     bpy.types.Scene.unwrapFloat = bpy.props.FloatProperty(
         name = "Int",
@@ -857,10 +1005,10 @@ def register():
     )
     bpy.types.Scene.mergeFloat = bpy.props.FloatProperty(
         name = "Int",
-        default = 0.02,
+        default = 0.01,
         soft_min = 0.00001,
         soft_max = 0.5,
-        step = 0.1,
+        step = 0.01,
 
     )
     
