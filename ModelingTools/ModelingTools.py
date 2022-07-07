@@ -1,6 +1,6 @@
 # ##### BEGIN GPL LICENSE BLOCK #####
 #
-#   Copyright (C) 2022  Blake Darrow <contact@blakedarrow.com>
+#   Copyright (C) 2020 - 2022  Blake Darrow <contact@blakedarrow.com>
 #
 #   This program is free software: you can redistribute it and/or modify
 #   it under the terms of the GNU General Public License as published by
@@ -42,9 +42,6 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
     bl_region_type = "UI"
     bl_idname = "DARROW_PT_toolPanel"
 
-    #def draw_header(self, context):
-        #self.layout.label(text="", icon="MESH_DATA")
-    
     def draw(self, context):
         layout = self.layout
         objs = context.selected_objects
@@ -68,8 +65,7 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                 cf.operator('cleanup.mesh', text = "Cleanup", icon="VERTEXSEL")
                 cf.operator('shade.smooth', text = "Smooth",icon="MOD_SMOOTH")
                 cf.operator("unwrap.selected", text="Unwrap", icon="UV")
-                cf.operator('apply.transforms', text="Transforms",
-                            icon="OBJECT_ORIGIN")
+                cf.operator('apply.transforms', text="Transforms",icon="OBJECT_ORIGIN")
                 cf.operator('apply.normals', text="Normals", icon="ORIENTATION_NORMAL")
                 cf.operator('shade.sharp', text="Sharp", icon="MOD_NOISE")
                 cf.operator('darrow.move_on_grid', text="Align", icon="MOD_LATTICE")
@@ -99,14 +95,14 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
             scn = context.scene
             col = layout.column(align=True)
             col.scale_y = 1.33
-
-            btn = col.row(align = True)
-            btn.scale_y = 1.5
-            btn.operator("darrow.move_on_grid", text="Align on grid", icon="MOD_LATTICE")
-            col.separator()
+            
             col.prop(scn, "alignGridRows", text="Row Amount", slider = True)
             col.prop(scn, "alignGridSpacing", text="Object Padding", slider = True)
             col.prop(scn, "alignGridHeight", text="Grid Height", slider = True)
+            col.separator()
+            btn = col.row(align = True)
+            btn.scale_y = 1.5
+            btn.operator("darrow.move_on_grid", text="Align on grid", icon="MOD_LATTICE")
 
 class DARROW_PT_toolPanel_3(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
@@ -254,9 +250,6 @@ class DARROW_PT_toolPanel_7(DarrowToolPanel, bpy.types.Panel):
         cf2.operator('view.create_orient', text="Set", icon="RESTRICT_SELECT_OFF")
         cf2.operator('clear.orientation', text="Clear", icon="TRASH")
 
-#-----------------------------------------------------#
-#    Grid 
-#-----------------------------------------------------#
 class DarrowMoveOnGrid(bpy.types.Operator):
     bl_label = "Align on grid"
     bl_idname = "darrow.move_on_grid"
@@ -290,9 +283,6 @@ class DarrowMoveOnGrid(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#    Cleanup Mesh
-#-----------------------------------------------------#
 class DarrowCleanupMesh(bpy.types.Operator):
     bl_label = "Example"
     bl_idname = "cleanup.mesh"
@@ -363,9 +353,6 @@ def extend_transfo_pop_up(self, context):
     row.operator(DarrowClearOrientation.bl_idname, icon='TRASH')
     row.operator(CTO_OT_Dummy.bl_idname, icon='BLANK1', emboss=False)
 
-#-----------------------------------------------------#
-#     set Black color
-#-----------------------------------------------------#
 class DarrowSetBlack(bpy.types.Operator):
     bl_idname = "set.black"
     bl_label = "Black"
@@ -375,9 +362,6 @@ class DarrowSetBlack(bpy.types.Operator):
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     set White color
-#-----------------------------------------------------#
 class DarrowSetWhite(bpy.types.Operator):
     bl_idname = "set.white"
     bl_label = "White"
@@ -387,9 +371,6 @@ class DarrowSetWhite(bpy.types.Operator):
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     set Red color
-#-----------------------------------------------------#
 class DarrowSetRed(bpy.types.Operator):
     bl_idname = "set.red"
     bl_label = "Red"
@@ -399,9 +380,6 @@ class DarrowSetRed(bpy.types.Operator):
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     set Green color
-#-----------------------------------------------------#
 class DarrowSetGreen(bpy.types.Operator):
     bl_idname = "set.green"
     bl_label = "Green"
@@ -411,9 +389,6 @@ class DarrowSetGreen(bpy.types.Operator):
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     set Blue color
-#-----------------------------------------------------#
 class DarrowSetBlue(bpy.types.Operator):
     bl_idname = "set.blue"
     bl_label = "Blue"
@@ -423,9 +398,6 @@ class DarrowSetBlue(bpy.types.Operator):
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     handles setting vertex color
-#-----------------------------------------------------#
 class DarrowSetColor(bpy.types.Operator):
     bl_idname = "set.color"
     bl_label = "Set Color"
@@ -461,9 +433,6 @@ class DarrowSetColor(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     handles setting shading display
-#-----------------------------------------------------#
 class DarrowSetDisplay(bpy.types.Operator):
     bl_idname = "set.display"
     bl_name = "Show Color"
@@ -488,9 +457,6 @@ class DarrowSetDisplay(bpy.types.Operator):
         bpy.context.scene.vertexDisplayBool = Var_displayBool
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     handles array
-#-----------------------------------------------------#
 class DarrowCircleArray(bpy.types.Operator):
     bl_idname = "circle.array"
     bl_description = "Move selected to world origin"
@@ -677,9 +643,6 @@ class DarrowClearSelected(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#     handles Orientation 
-#-----------------------------------------------------#
 class DarrowClearOrientation(bpy.types.Operator):
     bl_idname = "clear.orientation"
     bl_description = "Remove custom orientations"
@@ -698,13 +661,10 @@ class DarrowClearOrientation(bpy.types.Operator):
                 except Exception as e:
                     pass
         return {'FINISHED'}
-  
-#-----------------------------------------------------#  
-#    handle apply transforms
-#-----------------------------------------------------#  
+
 class DarrowTransforms(bpy.types.Operator):
     bl_idname = "apply.transforms"
-    bl_description = "Apply transformations to selected object"
+    bl_description = "Apply rotation and scale to selected object"
     bl_label = "Apply Rot & Scale"
     bl_options = {"UNDO"}
 
@@ -733,9 +693,6 @@ class DarrowTransforms(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-#-----------------------------------------------------#  
-#    handles Objects origin
-#-----------------------------------------------------#  
 class DarrowSetOrigin(bpy.types.Operator):
     bl_idname = "set.origin"
     bl_description = "Set selected as object origin"
@@ -761,9 +718,6 @@ class DarrowSetOrigin(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-#-----------------------------------------------------#  
-#     handles snapping object to world center
-#-----------------------------------------------------#   
 class DarrowMoveOrigin(bpy.types.Operator):
     bl_idname = "move.origin"
     bl_description = "Move selected to world origin"
@@ -781,10 +735,7 @@ class DarrowMoveOrigin(bpy.types.Operator):
         else:
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
-
-#-----------------------------------------------------#  
-#     handles apply outside calculated normals
-#-----------------------------------------------------#    
+  
 class DarrowNormals(bpy.types.Operator):
     bl_idname = "apply.normals"
     bl_description = "Calculate outside normals"
@@ -818,10 +769,7 @@ class DarrowNormals(bpy.types.Operator):
         else:
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
-    
-#-----------------------------------------------------#  
-#     handles smooth mesh
-#-----------------------------------------------------#    
+      
 class DarrowSmooth(bpy.types.Operator):
     bl_idname = "shade.smooth"
     bl_label = "Smooth Object"
@@ -881,9 +829,6 @@ class DarrowSharp(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-#-----------------------------------------------------#
-#    Quick Unwrap
-#-----------------------------------------------------#
 class DarrowUnwrapSelected(bpy.types.Operator):
     bl_label = "Example"
     bl_idname = "unwrap.selected"
@@ -936,15 +881,15 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    bpy.types.Scene.alignGridSpacing = bpy.props.IntProperty(
+    bpy.types.Scene.alignGridSpacing = bpy.props.FloatProperty(
         name = "Padding",
         default=1,
-        step=1,
+        step=.5,
         soft_max=50,
-        soft_min=1
+        soft_min=0,
     )
 
-    bpy.types.Scene.alignGridHeight = bpy.props.IntProperty(
+    bpy.types.Scene.alignGridHeight = bpy.props.FloatProperty(
         name = "Grid Height",
         default=0,
         step=1,

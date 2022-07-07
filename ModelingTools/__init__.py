@@ -7,19 +7,14 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, 
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 1, 1),
+    "version": (1, 1, 2),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > DarrowTools",
     "description": "Custom modeling tools",
     "category": "Tools",
-    "wiki_url": "https://docs.darrow.tools/en/latest/index.html",
+    "doc_url": "https://docs.darrow.tools/en/latest/index.html",
     }
     
-#-----------------------------------------------------#  
-#     add all new scripts to this string    
-#-----------------------------------------------------# 
-
-
 #-----------------------------------------------------#  
 #     imports    
 #-----------------------------------------------------#  
