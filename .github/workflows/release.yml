@@ -6,6 +6,7 @@ on:
     paths:
       - 'ModelingTools/**'
   workflow_dispatch:
+  
 jobs:
   zip_folder:
     runs-on: ubuntu-latest
@@ -35,19 +36,15 @@ jobs:
       steps:
         - uses: actions/checkout@v3
           with:
-            fetch-depth: 0 # Required due to the way Git works, without it this action won't be able to find any or the correct tags
+            fetch-depth: 0
         - uses: actions/download-artifact@v2
           with:
             name: ModelingTools
-            
-        - name: Get the version
-          id: get_version
-          run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
-            
+           
         - name: Release
           uses: softprops/action-gh-release@v1
           with:
-            tag_name: ${{steps.get_version.outputs.VERSION }}
+            target_commitish: 'Dev'
             body_path: ${{steps.build_changelog.outputs.changelog}}
             name:  ModelingTools
             files: ModelingTools.zip
