@@ -22,6 +22,7 @@
 #-----------------------------------------------------# 
 import bpy
 import math
+import random
 from bpy.types import (Panel,
                        Menu,
                        Operator,
@@ -277,6 +278,7 @@ class DarrowMoveOnGrid(bpy.types.Operator):
                 yPosArray.append(yPos)
 
         i = -1
+        random.shuffle(objs_sel)
         for obj in objs_sel:
             i = i +1
             obj.location = (xPosArray[i], yPosArray[i], zHeight)
