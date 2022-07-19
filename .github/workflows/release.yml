@@ -1,5 +1,8 @@
 name: Zip and Release
-on: [workflow_dispatch]
+on:
+  push:
+    paths:
+      - 'ModelingTools/**'
 jobs:
   zip_folder:
     runs-on: ubuntu-latest
