@@ -1,10 +1,8 @@
 name: Zip and Release
 on:
   push:
-    branches:
-      - 'main'
-    paths:
-      - 'ModelingTools/**'
+    tags:
+      - 'v*'
   workflow_dispatch:
   
 jobs:
@@ -35,12 +33,10 @@ jobs:
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v3
-          with:
-            fetch-depth: 0
         - uses: actions/download-artifact@v2
           with:
             name: ModelingTools
-           
+            
         - name: Release
           uses: softprops/action-gh-release@v1
           with:
