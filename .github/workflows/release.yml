@@ -40,13 +40,14 @@ jobs:
           with:
             name: ModelingTools
             
-        - uses: olegtarasov/get-tag@v2.1
-          id: tagName
+        - name: Get the version
+          id: get_version
+          run: echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
             
         - name: Release
           uses: softprops/action-gh-release@v1
           with:
-            tag_name: ${{ steps.tagName.outputs.tag }}
+            tag_name: ${{steps.get_version.outputs.VERSION }}
             body_path: ${{steps.build_changelog.outputs.changelog}}
             name:  ModelingTools
             files: ModelingTools.zip
