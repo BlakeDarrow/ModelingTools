@@ -42,7 +42,7 @@ jobs:
             name: ModelingTools
 
         - uses: olegtarasov/get-tag@v2.1
-        id: tagName
+          id: tagName
 
         - name: Release
           uses: softprops/action-gh-release@v1
