@@ -5,6 +5,7 @@ on:
       - 'main'
     paths:
       - 'ModelingTools/**'
+  workflow_dispatch:
 jobs:
   zip_folder:
     runs-on: ubuntu-latest
@@ -33,6 +34,8 @@ jobs:
       runs-on: ubuntu-latest
       steps:
         - uses: actions/checkout@v3
+          with:
+            fetch-depth: 0 # Required due to the way Git works, without it this action won't be able to find any or the correct tags
         - uses: actions/download-artifact@v2
           with:
             name: ModelingTools
