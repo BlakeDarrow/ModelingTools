@@ -10,7 +10,7 @@ bl_info = {
     "version": (1, 1, 5),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > DarrowTools",
-    "description": "Custom modeling tools",
+    "description": "Custom modeling tools including arrays and aligning on a grid",
     "category": "Tools",
     "doc_url": "https://docs.darrow.tools/en/latest/index.html",
     }
