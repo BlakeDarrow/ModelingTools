@@ -1,7 +1,7 @@
 
 
 # Modeling Tools #  
-Located in the Blender Viewport side panel. This addon adds useful modeling tools including circular arrays.
+Located in the Blender Viewport side panel. This addon adds useful modeling tools including circular arrays and aligning on grid.
 
 
 ## Features
