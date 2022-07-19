@@ -1,6 +1,8 @@
 name: Zip and Release
 on:
   push:
+    branches:
+      - 'main'
     paths:
       - 'ModelingTools/**'
 jobs:
