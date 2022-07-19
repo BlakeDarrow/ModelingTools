@@ -44,7 +44,6 @@ jobs:
         - name: Release
           uses: softprops/action-gh-release@v1
           with:
-            target_commitish: Dev
             body_path: ${{steps.build_changelog.outputs.changelog}}
             name:  ModelingTools
             files: ModelingTools.zip
