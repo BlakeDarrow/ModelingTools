@@ -7,7 +7,7 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, 
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 1, 4),
+    "version": (1, 1, 9),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > DarrowTools",
     "description": "Custom modeling tools including arrays and aligning on a grid",
