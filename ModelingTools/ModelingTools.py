@@ -474,7 +474,7 @@ class DarrowCircleArray(bpy.types.Operator):
         amt = context.scene.arrayAmount
         settings = context.preferences.addons[__package__].preferences
         selected = bpy.context.selected_objects[0]
-        empty_collection_name = "Darrow_Empties"
+        empty_collection_name = "dEmpties"
 
         for myCol in bpy.data.collections:
             if myCol.name == empty_collection_name:
