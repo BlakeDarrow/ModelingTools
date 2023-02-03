@@ -470,31 +470,64 @@ class DarrowCircleArray(bpy.types.Operator):
             bpy.ops.object.editmode_toggle()
 
         collectionFound = False
+        parentCollectionFound = False
         obj = bpy.context.selected_objects[0]
         amt = context.scene.arrayAmount
         settings = context.preferences.addons[__package__].preferences
         selected = bpy.context.selected_objects[0]
-        empty_collection_name = "dEmpties"
+        empty_collection_name = "_Empties"
+        parent_collection_name = "_SceneOrganizer"
 
         for myCol in bpy.data.collections:
+            
+            if myCol.name == parent_collection_name:
+                parentCollectionFound = True
+
             if myCol.name == empty_collection_name:
                 collectionFound = True
-                break
 
-        if collectionFound == False:
+        if not parentCollectionFound and not collectionFound:
+            parentCol = bpy.data.collections.new(parent_collection_name)
+            bpy.context.scene.collection.children.link(parentCol)
+            bpy.data.collections[parent_collection_name].color_tag = 'COLOR_05'
+
             col = bpy.data.collections.new(empty_collection_name)
-            bpy.context.scene.collection.children.link(col)
-            bpy.data.collections[empty_collection_name].color_tag = 'COLOR_01'
+            parentCol.children.link(col)
+            bpy.data.collections[empty_collection_name].color_tag = 'COLOR_03'
+        
+        elif parentCollectionFound and not collectionFound:
+            parentCol = bpy.data.collections[parent_collection_name]
+            col = bpy.data.collections.new(empty_collection_name)
 
-        else:
+            parentCol.children.link(col)
+            bpy.data.collections[empty_collection_name].color_tag = 'COLOR_03'
+
+        elif not parentCollectionFound and collectionFound:
             col = bpy.data.collections[empty_collection_name]
+
+            bpy.context.scene.collection.children.unlink(col)
+            parentCol = bpy.data.collections.new(parent_collection_name)
+
+            bpy.context.scene.collection.children.link(parentCol)
+            bpy.data.collections[parent_collection_name].color_tag = 'COLOR_05'
+
+            parentCol.children.link(col)
+
+        elif parentCollectionFound and collectionFound:
+            col = bpy.data.collections[empty_collection_name]
+        else:
+            parentCol = bpy.data.collections.new(parent_collection_name)
+            bpy.context.scene.collection.children.link(parentCol)
+
+            col = bpy.data.collections.new(empty_collection_name)
+            parentCol.children.link(col)
 
         bpy.context.scene.cursor.rotation_euler = (0, 0, 0)
         bpy.ops.object.transform_apply(
             location=True, rotation=True, scale=True)
         try:
-            if bpy.context.object.modifiers["DarrowToolkitArray"].offset_object == None:
-                modifier_to_remove = obj.modifiers.get("DarrowToolkitArray")
+            if bpy.context.object.modifiers["DarrowToolsArray"].offset_object == None:
+                modifier_to_remove = obj.modifiers.get("DarrowToolsArray")
                 obj.modifiers.remove(modifier_to_remove)
                 context.object.linkedEmpty = "tmp"
                 print("Resetting modifier")
@@ -510,7 +543,6 @@ class DarrowCircleArray(bpy.types.Operator):
 
         else:
             print("Array exists")
-            bpy.data.collections[empty_collection_name].color_tag = 'COLOR_01'
             empty = bpy.data.objects[context.object.linkedEmpty]
 
         bpy.ops.object.select_all(action='DESELECT')
@@ -521,26 +553,26 @@ class DarrowCircleArray(bpy.types.Operator):
         mod = bpy.context.object
 
         for modifier in mod.modifiers:
-            if modifier.name == "DarrowToolkitArray":
+            if modifier.name == "DarrowToolsArray":
                 array = True
 
         if not array:
             modifier = obj.modifiers.new(
-                name='DarrowToolkitArray', type='ARRAY')
+                name='DarrowToolsArray', type='ARRAY')
 
-            modifier.name = "DarrowToolkitArray"
+            modifier.name = "DarrowToolsArray"
             modifier.count = amt
             modifier.use_relative_offset = False
             modifier.use_object_offset = True
             modifier.offset_object = empty
         else:
-            modifier_to_remove = obj.modifiers.get("DarrowToolkitArray")
+            modifier_to_remove = obj.modifiers.get("DarrowToolsArray")
             obj.modifiers.remove(modifier_to_remove)
 
             modifier = obj.modifiers.new(
-                name='DarrowToolkitArray', type='ARRAY')
+                name='DarrowToolsArray', type='ARRAY')
 
-            modifier.name = "DarrowToolkitArray"
+            modifier.name = "DarrowToolsArray"
             modifier.count = amt
             modifier.use_relative_offset = False
             modifier.use_object_offset = True
@@ -551,7 +583,7 @@ class DarrowCircleArray(bpy.types.Operator):
            modAmt = modAmt + 1
 
         bpy.ops.object.modifier_move_to_index(
-            modifier="DarrowToolkitArray", index=modAmt)
+            modifier="DarrowToolsArray", index=modAmt)
         bpy.ops.object.select_all(action='DESELECT')
         empty.select_set(state=True)
         selected.select_set(state=False)
@@ -627,8 +659,8 @@ class DarrowClearSelected(bpy.types.Operator):
         mod = bpy.context.object
 
         for modifier in mod.modifiers:
-            if modifier.name == "DarrowToolkitArray":
-                modifier_to_remove = obj.modifiers.get("DarrowToolkitArray")
+            if modifier.name == "DarrowToolsArray":
+                modifier_to_remove = obj.modifiers.get("DarrowToolsArray")
                 obj.modifiers.remove(modifier_to_remove)
 
         if not context.object.linkedEmpty == "tmp":
