@@ -7,12 +7,12 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, 
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 1, 5),
+    "version": (1, 1, 6),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > DarrowTools",
     "description": "Custom modeling tools",
     "category": "Tools",
-    "doc_url": "https://docs.darrow.tools/en/latest/index.html",
+    "doc_url": "https://darrow.tools/ModelingTools",
     }
     
 #-----------------------------------------------------#  
@@ -95,7 +95,6 @@ class DarrowAddonPreferences(AddonPreferences):
         default=True
     )
 
-
     xBool: BoolProperty(
         name="X",
         description="Toggle X axis",
@@ -133,10 +132,10 @@ class DarrowAddonPreferences(AddonPreferences):
     removeDoublesAmount: FloatProperty(
         name="Remove Doubles Amount",
         description="Threshold to Remove Doubles",
-        default=0.01,
+        default=0.0003,
         soft_min=0,
-        soft_max=.25,
-        precision=3
+        soft_max=.01,
+        precision=5
     )
     moveEmptyBool: BoolProperty(
         name="Create CircleArray empties under 'Darrow_Empties'.",
@@ -149,20 +148,18 @@ class DarrowAddonPreferences(AddonPreferences):
         box = layout.box()
         box.label(text="Module Properties")
         box.alignment = 'RIGHT'
-        split = box.split(factor=0.7)
+        split = box.split(factor=1)
         box.scale_y = 1.1
         col1 = split.column(align=True)
 
         col1.prop(self, "emptySize", text="Empty Display Size", slider=True)
         col1.prop(self, "removeDoublesAmount",
                   text="Remove Doubles Distance", slider=True)
-        col1.prop(self, "moveEmptyBool", text="Move empties to 'Empty Collection'")
-
 
         addon_updater_ops.update_settings_ui(self, context)
 
 #-----------------------------------------------------#  
-#     create a dictonary for module names    
+#     create a dictionary for module names    
 #-----------------------------------------------------# 
 modulesFullNames = {}
 for currentModuleName in modulesNames:
