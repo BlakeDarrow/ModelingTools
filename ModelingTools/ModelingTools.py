@@ -23,6 +23,7 @@
 import bpy
 import math
 import random
+import bmesh
 from bpy.types import (Panel,
                        Menu,
                        Operator,
@@ -47,19 +48,17 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
         layout = self.layout
         objs = context.selected_objects
         all = bpy.data.objects
+        layout.label(text="Modeling Tools")
         if len(all) != 0:
             if context.mode == 'EDIT_MESH':
                 layout = self.layout
-                layout.label(text="Mesh Tools")
                 col = layout.box().column(align=True)
                 col.scale_y = 1.33
                 col.operator('set.origin', text="Set as Origin", icon="PIVOT_CURSOR")
 
             if context.mode == 'OBJECT':
-                col = layout.column(align=True)
-                col.scale_y = 1
-                col.label(text="Mesh Tools")
-                cf = layout.box().column_flow(columns=2, align=True)
+                box = layout.box().column(align=True)
+                cf = box.column_flow(columns=2, align=True)
                 cf.scale_y = 1.2
                 cf.operator('move.origin', text="Origin",
                             icon="TRANSFORM_ORIGINS")
@@ -78,8 +77,7 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
 
 class DARROW_PT_toolExtendPanel(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
-    bl_label = "Tools and Options"
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_label = "More Tools"
 
     def draw(self, context):
         none = None
@@ -99,7 +97,7 @@ class DARROW_PT_toolPanel_2(DarrowToolPanel, bpy.types.Panel):
             
             col.prop(scn, "alignGridRows", text="Row Amount", slider = True)
             col.prop(scn, "alignGridSpacing", text="Object Padding", slider = True)
-            col.prop(scn, "alignGridHeight", text="Grid Height", slider = True)
+            col.prop(scn, "alignGridHeight", text="Offset Height", slider = True)
             col.separator()
             btn = col.row(align = True)
             btn.scale_y = 1.5
@@ -169,16 +167,37 @@ class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
     def draw(self, context):
         all = bpy.data.objects
         if len(all) != 0:
+            objs = context.selected_objects
             layout = self.layout
             scn = context.scene
-            col = layout.column(align=True)
-            col.scale_y = 1.2
-            col.operator("unwrap.selected", text="Unwrap All Selected", icon="UV")
-            col.prop(scn, "unwrapFloat", text="Angle")
+            prnt = layout.column(align=True)
+           
+            col = prnt.column(align=True)
+            col.scale_y = 1.33
+            col.operator("unwrap.selected", text="Unwrap Objects", icon="UV")
+            col.separator()
+            if len(objs) == 0:
+                col.enabled = False
+
+            prop = prnt.column(align=True)
+            prop.scale_y = 1.33
+            prop.prop(scn, "unwrapAngle", text="Unwrap Angle", slider=True)
+
+            col = prnt.column(align=True)
+            col.scale_y = 1.33
+            col.prop(scn, "sharp_seam", text="Generate Seams", toggle=True, icon ="MOD_EDGESPLIT")
+            split = col.split(align=True)
+            reset = col.column(align=True)
+            split.operator("clear.sharp", text="Clear Sharp")
+            split.operator("clear.seam", text="Clear Seams")
+            reset.operator("clear.uvs", text="Clear UVs")
+            if len(objs) == 0:
+                split.enabled = False
+                reset.enabled = False
 
 class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
-    bl_label = "RGB Masking"
+    bl_label = "Quick Vertex Color"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -187,35 +206,47 @@ class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
             Var_displayBool = bpy.context.scene.vertexDisplayBool
             Var_viewportShading = bpy.context.space_data.shading.type
             objs = context.selected_objects
-            layout = self.layout    
-            split = layout.column()
-            row = split.row(align=True)
+
+            layout = self.layout   
+            row = layout.row(align=True)
+            row.scale_y = 1.33
+            row.prop(context.scene, "colorPicker", text="")
+            
+            if len(objs) == 0:
+                row.enabled = False
+
             col = layout.column()
             col.scale_y = 1.33
-            row.scale_y = 1.1
-            row.operator('set.black')
-            row.operator('set.white')
-            if len(objs) == 0:
-                row.enabled = False
-
-            row = split.row(align=True)
-            row.scale_y = 1.1
-            row.operator('set.red')
-            row.operator('set.green')
-            row.operator('set.blue')
-            split = layout.column()
-            if len(objs) == 0:
-                row.enabled = False
-
             if Var_displayBool == True:
                 col.operator('set.display', icon="HIDE_OFF",
-                                     text="Display Color", depress=Var_displayBool)
+                                     text="Hide Colors", depress=Var_displayBool)
             else:
                 col.operator('set.display', icon="HIDE_ON",
-                                     text="Display Color", depress=Var_displayBool)
+                                     text="Show Colors", depress=Var_displayBool)
             if Var_viewportShading != 'SOLID':
                 col.enabled = False
 
+            split = layout.column(align=True)
+
+            row = split.row(align=True)
+
+            row.scale_y = 1.1
+            row.operator('set.black')
+            row.operator('set.white')
+
+            if len(objs) == 0:
+                row.enabled = False
+
+            row = split.row(align=True)
+            row.scale_y = 1.1
+
+            row.operator('set.red')
+            row.operator('set.green')
+            row.operator('set.blue')
+
+            if len(objs) == 0:
+                row.enabled = False
+           
 class DARROW_PT_toolPanel_6(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Cleanup Mesh"
@@ -285,7 +316,7 @@ class DarrowMoveOnGrid(bpy.types.Operator):
 
         return {'FINISHED'}
 
-class DarrowCleanupMesh(bpy.types.Operator):
+class DarrowCleanupMesh(bpy.types.Operator):    
     bl_label = "Example"
     bl_idname = "cleanup.mesh"
     bl_options = {'REGISTER', 'UNDO'}
@@ -372,6 +403,11 @@ class DarrowSetWhite(bpy.types.Operator):
         bpy.data.brushes["Draw"].color = (1, 1, 1)
         DarrowSetColor.execute(self, context)
         return {'FINISHED'}
+
+def UpdateVertColor(self, context):
+    bpy.data.brushes["Draw"].color = context.scene.colorPicker
+    DarrowSetColor.execute(self, context)
+    return
 
 class DarrowSetRed(bpy.types.Operator):
     bl_idname = "set.red"
@@ -784,17 +820,19 @@ class DarrowNormals(bpy.types.Operator):
             bpy.context.view_layer.objects.active = None
 
             for obj in objs:
-                obj.select_set(state=True)
-                bpy.context.view_layer.objects.active = obj
+                if obj.type == "MESH":
+                    obj.select_set(state=True)
+                    bpy.context.view_layer.objects.active = obj
 
-                bpy.ops.object.editmode_toggle()
-                bpy.ops.mesh.select_all(action='SELECT')
-                bpy.ops.mesh.normals_make_consistent(inside=False)
-                bpy.ops.object.editmode_toggle()
-                obj.select_set(state=False)
+                    bpy.ops.object.editmode_toggle()
+                    bpy.ops.mesh.select_all(action='SELECT')
+                    bpy.ops.mesh.normals_make_consistent(inside=False)
+                    bpy.ops.object.editmode_toggle()
+                    obj.select_set(state=False)
 
             for obj in objs:
-                obj.select_set(True)
+                if obj.type == "MESH":
+                    obj.select_set(True)
 
             bpy.context.view_layer.objects.active = active
 
@@ -817,15 +855,17 @@ class DarrowSmooth(bpy.types.Operator):
             bpy.context.view_layer.objects.active = None
 
             for obj in objs:
-                obj.select_set(state=True)
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.shade_smooth()
-                bpy.context.object.data.use_auto_smooth = True
-                bpy.context.object.data.auto_smooth_angle = 3.14159
-                obj.select_set(state=False)
+                if obj.type == "MESH":
+                    obj.select_set(state=True)
+                    bpy.context.view_layer.objects.active = obj
+                    bpy.ops.object.shade_smooth()
+                    bpy.context.object.data.use_auto_smooth = True
+                    bpy.context.object.data.auto_smooth_angle = 3.14159
+                    obj.select_set(state=False)
             
             for obj in objs:
-                obj.select_set(True)
+                if obj.type == "MESH":
+                    obj.select_set(True)
 
             bpy.context.view_layer.objects.active = active
             self.report({'INFO'}, "Object smoothed to 180")
@@ -846,15 +886,17 @@ class DarrowSharp(bpy.types.Operator):
             bpy.context.view_layer.objects.active = None
 
             for obj in objs:
-                obj.select_set(state=True)
-                bpy.context.view_layer.objects.active = obj
-                bpy.ops.object.shade_smooth()
-                bpy.context.object.data.use_auto_smooth = True
-                bpy.context.object.data.auto_smooth_angle = 1.15192
-                obj.select_set(state=False)
+                if obj.type == "MESH":
+                    obj.select_set(state=True)
+                    bpy.context.view_layer.objects.active = obj
+                    bpy.ops.object.shade_smooth()
+                    bpy.context.object.data.use_auto_smooth = True
+                    bpy.context.object.data.auto_smooth_angle = 1.15192
+                    obj.select_set(state=False)
 
             for obj in objs:
-                obj.select_set(True)
+                if obj.type == "MESH":
+                    obj.select_set(True)
 
             bpy.context.view_layer.objects.active = active
 
@@ -863,68 +905,273 @@ class DarrowSharp(bpy.types.Operator):
             self.report({'INFO'}, "None Selected")
         return {'FINISHED'}
 
-class DarrowUnwrapSelected(bpy.types.Operator):
-    bl_label = "Example"
-    bl_idname = "unwrap.selected"
-    bl_description = "Unwrap all selection"
-    bl_options = {'REGISTER', 'UNDO'}
+class DarrowClearSharp(bpy.types.Operator):
+    bl_idname = "clear.sharp"
+    bl_label = "Clear sharp edges"
+    bl_description = "Clear all sharp edges"
 
     def execute(self, context):
-        scn = bpy.data.objects
         selection = bpy.context.selected_objects
-        active_object = bpy.context.active_object
-        angle = math.radians(bpy.context.scene.unwrapFloat)
-        
         if context.mode == 'OBJECT':
             bpy.ops.object.select_all(action='DESELECT')
         else:
             bpy.ops.mesh.select_all(action='DESELECT')
         
         for i in selection:
-            i.select_set(True)
-            bpy.context.view_layer.objects.active = i
-            
-            if context.mode == 'OBJECT':
+            if i.type == "MESH":
+                i.select_set(True)
+                bpy.context.view_layer.objects.active = i
+                obj = bpy.context.active_object
+                if context.mode != 'OBJECT':
+                    bpy.ops.object.editmode_toggle()
+
+                if obj is not None and obj.type == 'MESH':
+                    bm = bmesh.new()
+                    bm.from_mesh(obj.data)
+
+                    for edge in bm.edges:
+                        edge.smooth = True
+
+                    bm.to_mesh(obj.data)
+                    bm.free()
+                
+                if context.mode == 'OBJECT':
+                    bpy.ops.object.editmode_toggle()
+                    
+                bpy.ops.mesh.select_all(action='DESELECT')
                 bpy.ops.object.editmode_toggle()
-            
-            bpy.ops.mesh.select_all(action='SELECT')
-            
-            bpy.ops.uv.smart_project(
-                angle_limit=angle,
-                island_margin=0.0, 
-                area_weight=0.0, 
-                correct_aspect=True,
-                scale_to_bounds=False)
                 
-            bpy.ops.object.editmode_toggle()
-            
-            i.select_set(False)
-                
-        amt = len(selection)
+                i.select_set(False)
+
         for i in selection:
             i.select_set(True)
-        self.report({'INFO'}, "Unwrapped " + str(amt) + " at " + str(bpy.context.scene.unwrapFloat) + " angle")
+                 
+        self.report({'INFO'}, "Cleared all Seams")
         return {'FINISHED'}
+    
+class DarrowClearSeam(bpy.types.Operator):
+    bl_idname = "clear.seam"
+    bl_label = "Clear seamed edges"
+    bl_description = "Clear all seam edges"
+
+    def execute(self, context):
+        selection = bpy.context.selected_objects
+        if context.mode == 'OBJECT':
+            bpy.ops.object.select_all(action='DESELECT')
+        else:
+            bpy.ops.mesh.select_all(action='DESELECT')
+        
+        for i in selection:
+            if i.type == "MESH":
+                i.select_set(True)
+                bpy.context.view_layer.objects.active = i
+                obj = bpy.context.active_object
+                if context.mode != 'OBJECT':
+                    bpy.ops.object.editmode_toggle()
+
+                if obj is not None and obj.type == 'MESH':
+                    bm = bmesh.new()
+                    bm.from_mesh(obj.data)
+
+                    for edge in bm.edges:
+                        edge.seam = False
+
+                    bm.to_mesh(obj.data)
+                    bm.free()
+                
+                if context.mode == 'OBJECT':
+                    bpy.ops.object.editmode_toggle()
+                
+                bpy.ops.mesh.select_all(action='DESELECT')
+                bpy.ops.object.editmode_toggle()
+                
+                i.select_set(False)
+
+        for i in selection:
+            i.select_set(True)
+                
+        self.report({'INFO'}, "Cleared all Seams")
+        return {'FINISHED'}
+
+class DarrowClearUVs(bpy.types.Operator):
+    bl_idname = "clear.uvs"
+    bl_label = "Clear UVs"
+    bl_description = "Clear all UVs"
+
+    def execute(self, context):
+        selection = bpy.context.selected_objects
+
+        for i in selection:
+            if i.type == "MESH":
+                bpy.context.view_layer.objects.active = i
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.uv.reset()
+                bpy.ops.mesh.select_all(action='DESELECT')
+                bpy.ops.object.mode_set(mode='OBJECT')
+
+        return {'FINISHED'}
+
+def updateSharpSeam(self, context):
+    unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
+    selection = bpy.context.selected_objects
+
+    if bpy.context.scene.sharp_seam:
+        for i in selection:
+            if i.type == "MESH":
+                i.select_set(True)
+                bpy.context.view_layer.objects.active = i
+
+                obj = bpy.context.active_object
+
+                if bpy.context.scene.sharp_seam:
+                    
+                    if context.mode == 'OBJECT':
+                        bpy.ops.object.editmode_toggle()
+
+                    bpy.ops.mesh.select_all(action='SELECT')
+
+                    if context.mode != 'OBJECT':
+                        bpy.ops.object.editmode_toggle()
+                    
+                    if obj is not None and obj.type == 'MESH':
+                        bm = bmesh.new()
+                        bm.from_mesh(obj.data)
+
+                        for edge in bm.edges:
+                            angle = edge.calc_face_angle()
+                            edge.seam = False
+                            edge.smooth = True
+                            if angle > unwrap_angle:
+                                edge.smooth = False  # Mark edge as sharp
+                                edge.seam = True  # Mark edge as sharp
+                            
+                        bm.to_mesh(obj.data)
+                        bm.free()
+                        
+                    if context.mode == 'OBJECT':
+                        bpy.ops.object.editmode_toggle()
+                        bpy.ops.mesh.select_all(action='DESELECT')
+
+                    
+        for i in selection:
+            if context.mode == 'OBJECT':
+                bpy.ops.object.editmode_toggle()
+                i.select_set(True)
+                
+class DarrowUnwrapSelected(bpy.types.Operator):
+    bl_label = "Example"
+    bl_idname = "unwrap.selected"
+    bl_description = "Unwrap all selection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def standard_unwrap(self, obj):
+        selected = bpy.context.selected_objects
+        for object in selected:
+            object.select_set(False)
+            object.hide_viewport = True
+
+        obj.select_set(True)
+        obj.hide_viewport = False
+        bpy.context.view_layer.objects.active = obj
+
+        unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        if obj is not None and obj.type == 'MESH':
+            bm = bmesh.new()
+            bm.from_mesh(obj.data)
+
+            for edge in bm.edges:
+                angle = edge.calc_face_angle()
+
+                if angle > unwrap_angle:
+                    edge.smooth = False  # Mark edge as sharp
+                    edge.seam = True  # Mark edge as sharp
+            
+            bm.to_mesh(obj.data)
+            bm.free()
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_mode(type='FACE')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0)
+        bpy.ops.object.mode_set(mode='OBJECT')
+    
+    def smart_unwrap(self, obj):
+        selected = bpy.context.selected_objects
+        for object in selected:
+            object.select_set(False)
+            object.hide_viewport = True
+
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        obj.hide_viewport = False
+        unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
+        
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_mode(type='FACE')
+        bpy.ops.mesh.select_all(action='SELECT')
+            
+        bpy.ops.uv.smart_project(
+            angle_limit=unwrap_angle,
+            island_margin=0.0, 
+            area_weight=0.0, 
+            correct_aspect=True,
+            scale_to_bounds=False)
+        
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    def execute(self, context):
+        selection = bpy.context.selected_objects
+
+        for i in selection:
+            if i.type == "MESH":
+                if bpy.context.scene.sharp_seam:
+                    self.standard_unwrap(i)
+                else:
+                    self.smart_unwrap(i)
+                              
+        amt = 0
+        for i in selection:
+            if i.type == "MESH":
+                i.select_set(True)
+                amt += 1
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+
+        self.report({'INFO'}, "Unwrapped " + str(amt) + " at " + str(bpy.context.scene.unwrapAngle) + " angle")
+        return {'FINISHED'}
+
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected,DarrowMoveOnGrid)
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    bpy.types.Scene.alignGridSpacing = bpy.props.FloatProperty(
-        name = "Padding",
-        default=1,
-        step=.5,
-        soft_max=50,
-        soft_min=0,
+    bpy.types.Scene.sharp_seam = bpy.props.BoolProperty(
+        name="Mark Sharp and Seam",
+        description="When unwrapping, mark angled edges as sharp and seam",
+        default=True
+    )
+
+    bpy.types.Scene.colorPicker = bpy.props.FloatVectorProperty(
+        name = "Color Picker",
+        subtype = "COLOR",
+        min = 0.0,
+        max = 1.0,
+        size = 3,
+        default = (1.0,1.0,1.0),
+        update=UpdateVertColor
     )
 
     bpy.types.Scene.alignGridHeight = bpy.props.FloatProperty(
-        name = "Grid Height",
+        name = "Grid Height Offset",
         default=0,
         step=1,
         soft_max=50,
@@ -939,9 +1186,20 @@ def register():
         soft_min=1
     )
 
-    bpy.types.Scene.unwrapFloat = bpy.props.FloatProperty(
+    bpy.types.Scene.alignGridSpacing = bpy.props.FloatProperty(
+        name = "Spacing",
+        default=15,
+        soft_max=50,
+        soft_min=1
+    )
+
+    bpy.types.Scene.unwrapAngle = bpy.props.IntProperty(
         name = "Int",
         default = 66,
+        min = 0,
+        max = 89,
+        step = 1,
+        update = updateSharpSeam
     )
 
     bpy.types.Scene.vertexDisplayBool = bpy.props.BoolProperty(
