@@ -7,7 +7,7 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, FloatProperty, 
 bl_info = {
     "name": "Modeling Tools",
     "author": "Blake Darrow",
-    "version": (1, 1, 6),
+    "version": (1, 1, 7),
     "blender": (3, 0, 0),
     "location": "View3D > Sidebar > DarrowTools",
     "description": "Custom modeling tools",
@@ -132,7 +132,7 @@ class DarrowAddonPreferences(AddonPreferences):
     removeDoublesAmount: FloatProperty(
         name="Remove Doubles Amount",
         description="Threshold to Remove Doubles",
-        default=0.0003,
+        default=0.0001,
         soft_min=0,
         soft_max=.01,
         precision=5
