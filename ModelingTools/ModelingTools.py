@@ -196,12 +196,35 @@ class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
             split_sharp.operator("clear.sharp", text="", icon="TRASH")
 
             prnt.separator()
+            
+            # Texel Density Settings
+            texel_box = prnt.column(align=True)
+            texel_box.prop(scn, "useTexelDensity", text="Use Texel Density", toggle=True)
+            
+            if scn.useTexelDensity:
+                texel_col = texel_box.column(align=True)
+                texel_col.prop(scn, "textureResolution", text="Texture Size")
+                
+                # Unit selector
+                texel_col.prop(scn, "texelDensityUnit", text="Unit")
+                
+                # Show appropriate preset based on unit
+                if scn.texelDensityUnit == 'PX_M':
+                    texel_col.prop(scn, "texelDensityPresetMeters", text="Density")
+                    td_value = float(scn.texelDensityPresetMeters)
+                    texel_col.label(text=f"= {td_value:.2f} px/m", icon='INFO')
+                else:
+                    texel_col.prop(scn, "texelDensityPresetCentimeters", text="Density")
+                    td_value = float(scn.texelDensityPresetCentimeters)
+                    texel_col.label(text=f"= {td_value:.2f} px/cm", icon='INFO')
+            
+            prnt.separator()
             unwrap = prnt.row(align=True)
             unwrap.scale_y = 1.5
             unwrap.operator("unwrap.selected", text="Unwrap Objects", icon="UV")
             unwrap.operator("clear.uvs", text="", icon="TRASH")
 
-            if len(objs) == 0:
+            if len(objs) == 0 and context.mode != 'EDIT_MESH':
                 split_sharp.enabled = False
                 split_seam.enabled = False
                 unwrap.enabled = False
@@ -1046,136 +1069,279 @@ class DarrowClearUVs(bpy.types.Operator):
 def updateSharpSeam(self, context):
     unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
     selection = bpy.context.selected_objects
+    
+    if not (bpy.context.scene.sharp or bpy.context.scene.seam):
+        return
 
-    if bpy.context.scene.sharp or bpy.context.scene.seam:
-        for i in selection:
-            if i.type == "MESH":
-                i.select_set(True)
-                bpy.context.view_layer.objects.active = i
+    # Store original mode
+    original_mode = context.mode
+    
+    for i in selection:
+        if i.type == "MESH":
+            # Make sure we're in object mode
+            if context.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            
+            bpy.context.view_layer.objects.active = i
+            obj = bpy.context.active_object
+            
+            if obj is not None and obj.type == 'MESH':
+                bm = bmesh.new()
+                bm.from_mesh(obj.data)
 
-                obj = bpy.context.active_object
-
-                if bpy.context.scene.sharp or bpy.context.scene.seam:
+                for edge in bm.edges:
+                    # Reset edges first
+                    edge.seam = False
+                    edge.smooth = True
                     
-                    if context.mode == 'OBJECT':
-                        bpy.ops.object.editmode_toggle()
-
-                    bpy.ops.mesh.select_all(action='SELECT')
-
-                    if context.mode != 'OBJECT':
-                        bpy.ops.object.editmode_toggle()
-                    
-                    if obj is not None and obj.type == 'MESH':
-                        bm = bmesh.new()
-                        bm.from_mesh(obj.data)
-
-                        for edge in bm.edges:
-                            angle = edge.calc_face_angle()
-                            edge.seam = False
-                            edge.smooth = True
-                            if angle > unwrap_angle:
-                                if bpy.context.scene.sharp:
-                                    edge.smooth = False  # Mark edge as sharp
-                                if bpy.context.scene.seam:
-                                    edge.seam = True  # Mark edge as sharp
-                            
-                        bm.to_mesh(obj.data)
-                        bm.free()
+                    # Only calculate angle for edges that have exactly 2 faces
+                    if len(edge.link_faces) == 2:
+                        angle = edge.calc_face_angle()
                         
-                    if context.mode == 'OBJECT':
-                        bpy.ops.object.editmode_toggle()
-                        bpy.ops.mesh.select_all(action='DESELECT')
-
-        for i in selection:
-            if context.mode == 'OBJECT':
-                bpy.ops.object.editmode_toggle()
-                i.select_set(True)
+                        if angle > unwrap_angle:
+                            if bpy.context.scene.sharp:
+                                edge.smooth = False  # Mark edge as sharp
+                            if bpy.context.scene.seam:
+                                edge.seam = True  # Mark edge as seam
+                    else:
+                        # For boundary edges or non-manifold geometry
+                        if bpy.context.scene.sharp:
+                            edge.smooth = False
+                        if bpy.context.scene.seam:
+                            edge.seam = True
+                        
+                bm.to_mesh(obj.data)
+                bm.free()
+    
+    # Restore original mode
+    if original_mode == 'EDIT_MESH':
+        bpy.ops.object.mode_set(mode='EDIT')
+    
+    # Reselect objects
+    for i in selection:
+        i.select_set(True)
                 
 class DarrowUnwrapSelected(bpy.types.Operator):
     bl_label = "Example"
     bl_idname = "unwrap.selected"
-    bl_description = "Unwrap all selection"
+    bl_description = "Unwrap all selection with optional texel density"
     bl_options = {'REGISTER', 'UNDO'}
 
-    def standard_unwrap(self, obj):
-        selected = bpy.context.selected_objects
-        for object in selected:
-            object.select_set(False)
-            object.hide_viewport = True
-
-        obj.select_set(True)
-        obj.hide_viewport = False
-        bpy.context.view_layer.objects.active = obj
-
+    def mark_edges_for_unwrap(self, obj):
+        """Mark sharp/seam edges based on angle"""
         unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
-        bpy.ops.object.mode_set(mode='OBJECT')
-
+        
         if obj is not None and obj.type == 'MESH':
             bm = bmesh.new()
             bm.from_mesh(obj.data)
 
             for edge in bm.edges:
-                angle = edge.calc_face_angle()
+                # Only calculate angle for edges that have exactly 2 faces
+                if len(edge.link_faces) == 2:
+                    angle = edge.calc_face_angle()
 
-                if angle > unwrap_angle:
+                    if angle > unwrap_angle:
+                        if bpy.context.scene.sharp:
+                            edge.smooth = False  # Mark edge as sharp
+                        if bpy.context.scene.seam:
+                            edge.seam = True  # Mark edge as seam
+                else:
+                    # For boundary edges or non-manifold geometry, mark as seam/sharp
                     if bpy.context.scene.sharp:
-                        edge.smooth = False  # Mark edge as sharp
+                        edge.smooth = False
                     if bpy.context.scene.seam:
-                        edge.seam = True  # Mark edge as sharp
+                        edge.seam = True
             
             bm.to_mesh(obj.data)
             bm.free()
 
+    def batch_unwrap(self, objects, use_seam_sharp):
+        """Unwrap multiple objects together"""
+        scn = bpy.context.scene
+        unwrap_angle = math.radians(scn.unwrapAngle)
+        
+        # Store original mode
+        original_mode = bpy.context.mode
+        
+        # Make sure we're in object mode to start
+        if original_mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Deselect all first
+        bpy.ops.object.select_all(action='DESELECT')
+        
+        # Mark edges for all objects if using seam/sharp
+        if use_seam_sharp:
+            for obj in objects:
+                if obj.type == "MESH":
+                    bpy.context.view_layer.objects.active = obj
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    self.mark_edges_for_unwrap(obj)
+        
+        # Select all mesh objects
+        mesh_objects = [obj for obj in objects if obj.type == "MESH"]
+        for obj in mesh_objects:
+            obj.select_set(True)
+        
+        if not mesh_objects:
+            return 0
+        
+        bpy.context.view_layer.objects.active = mesh_objects[0]
+        
+        # Enter edit mode with all objects
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_mode(type='FACE')
         bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0)
+        
+        # Unwrap
+        if use_seam_sharp:
+            bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.001)
+        else:
+            bpy.ops.uv.smart_project(
+                angle_limit=unwrap_angle,
+                island_margin=0.001, 
+                area_weight=0.0, 
+                correct_aspect=True,
+                scale_to_bounds=False)
+        
+        # Exit edit mode before applying texel density
         bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Apply texel density if enabled
+        if scn.useTexelDensity:
+            self.apply_texel_density(mesh_objects)
+        
+        return len(mesh_objects)
     
-    def smart_project(self, obj):
-        selected = bpy.context.selected_objects
-        for object in selected:
-            object.select_set(False)
-            object.hide_viewport = True
-
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-        obj.hide_viewport = False
-        unwrap_angle = math.radians(bpy.context.scene.unwrapAngle)
+    def apply_texel_density(self, objects):
+        """Apply uniform texel density across all objects"""
+        scn = bpy.context.scene
+        texture_size = int(scn.textureResolution)
         
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_mode(type='FACE')
-        bpy.ops.mesh.select_all(action='SELECT')
+        # Get texel density and convert to pixels per meter
+        if scn.texelDensityUnit == 'PX_M':
+            texel_density = float(scn.texelDensityPresetMeters)
+        else:  # PX_CM
+            texel_density = float(scn.texelDensityPresetCentimeters) * 100.0  # Convert px/cm to px/m
+        
+        for obj in objects:
+            if obj.type != 'MESH':
+                continue
             
-        bpy.ops.uv.smart_project(
-            angle_limit=unwrap_angle,
-            island_margin=0.0, 
-            area_weight=0.0, 
-            correct_aspect=True,
-            scale_to_bounds=False)
-        
-        bpy.ops.object.mode_set(mode='OBJECT')
+            # Make sure we're in object mode
+            if bpy.context.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+                
+            bpy.context.view_layer.objects.active = obj
+            
+            # Get mesh data
+            mesh = obj.data
+            if not mesh.uv_layers or not mesh.uv_layers.active:
+                continue
+            
+            # Force update mesh data
+            mesh.update()
+            
+            uv_layer = mesh.uv_layers.active.data
+            
+            # Check if UV layer has data
+            if len(uv_layer) == 0:
+                continue
+            
+            # Calculate 3D surface area
+            bm = bmesh.new()
+            bm.from_mesh(mesh)
+            bm.faces.ensure_lookup_table()
+            
+            surface_area_3d = sum(face.calc_area() for face in bm.faces)
+            bm.free()
+            
+            if surface_area_3d <= 0:
+                continue
+            
+            # Calculate UV area
+            uv_area = 0.0
+            for poly in mesh.polygons:
+                # Get UV coordinates for this polygon
+                uv_coords = []
+                for loop_index in poly.loop_indices:
+                    uv_coords.append(uv_layer[loop_index].uv[:])
+                
+                # Calculate UV polygon area using shoelace formula
+                if len(uv_coords) >= 3:
+                    area = 0.0
+                    for i in range(len(uv_coords)):
+                        j = (i + 1) % len(uv_coords)
+                        area += uv_coords[i][0] * uv_coords[j][1]
+                        area -= uv_coords[j][0] * uv_coords[i][1]
+                    uv_area += abs(area) * 0.5
+            
+            if uv_area <= 0:
+                continue
+            
+            # Correct Texel Density formula:
+            # Texel Density (pixels/meter) = Texture Width (pixels) × √(UV Area / 3D Surface Area in m²)
+            # 
+            # To achieve target texel density:
+            # target_TD = texture_size × √(UV_area / 3D_area)
+            # Solve for new UV_area:
+            # target_TD / texture_size = √(new_UV_area / 3D_area)
+            # (target_TD / texture_size)² = new_UV_area / 3D_area
+            # new_UV_area = 3D_area × (target_TD / texture_size)²
+            # 
+            # Scale factor = √(new_UV_area / current_UV_area)
+            
+            current_texel_density = texture_size * math.sqrt(uv_area / surface_area_3d)
+            scale_factor = texel_density / current_texel_density
+            
+            # Scale all UV coordinates from origin (0, 0)
+            for poly in mesh.polygons:
+                for loop_index in poly.loop_indices:
+                    uv = uv_layer[loop_index].uv
+                    uv_layer[loop_index].uv = (uv[0] * scale_factor, uv[1] * scale_factor)
+            
+            # Update mesh
+            mesh.update()
 
     def execute(self, context):
         selection = bpy.context.selected_objects
-
-        for i in selection:
-            if i.type == "MESH":
-                if bpy.context.scene.sharp or bpy.context.scene.seam:
-                    self.standard_unwrap(i)
+        
+        # If no objects selected but in edit mode, get the active object
+        if len(selection) == 0 and context.mode == 'EDIT_MESH':
+            if context.active_object and context.active_object.type == 'MESH':
+                selection = [context.active_object]
+        
+        if len(selection) == 0:
+            self.report({'WARNING'}, "No mesh objects selected")
+            return {'CANCELLED'}
+        
+        use_seam_sharp = bpy.context.scene.sharp or bpy.context.scene.seam
+        
+        # Batch unwrap all objects together
+        amt = self.batch_unwrap(selection, use_seam_sharp)
+        
+        # Reselect all objects
+        for obj in selection:
+            if obj.type == "MESH":
+                obj.select_set(True)
+        
+        if amt > 0:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            
+            message = f"Unwrapped {amt} object(s) at {bpy.context.scene.unwrapAngle}° angle"
+            if bpy.context.scene.useTexelDensity:
+                if bpy.context.scene.texelDensityUnit == 'PX_M':
+                    td_value = float(bpy.context.scene.texelDensityPresetMeters)
+                    message += f" with {td_value:.2f} px/m texel density"
                 else:
-                    self.smart_project(i)
-
-        amt = 0
-        for i in selection:
-            if i.type == "MESH":
-                i.select_set(True)
-                amt += 1
-
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-
-        self.report({'INFO'}, "Unwrapped " + str(amt) + " at " + str(bpy.context.scene.unwrapAngle) + " angle")
+                    td_value = float(bpy.context.scene.texelDensityPresetCentimeters)
+                    message += f" with {td_value:.2f} px/cm texel density"
+            
+            self.report({'INFO'}, message)
+        else:
+            self.report({'WARNING'}, "No mesh objects selected")
+        
         return {'FINISHED'}
 
 class DARROW_MT_modelingPie(Menu):
@@ -1295,6 +1461,71 @@ def register():
         max = 89,
         step = 1,
         update = updateSharpSeam
+    )
+
+    bpy.types.Scene.useTexelDensity = bpy.props.BoolProperty(
+        name="Use Texel Density",
+        description="Apply uniform texel density when unwrapping",
+        default=False
+    )
+
+    bpy.types.Scene.texelDensityUnit = bpy.props.EnumProperty(
+        name="Texel Density Unit",
+        description="Unit for texel density measurement",
+        items=[
+            ('PX_M', "px/m", "Pixels per meter"),
+            ('PX_CM', "px/cm", "Pixels per centimeter"),
+        ],
+        default='PX_CM'
+    )
+
+    bpy.types.Scene.textureResolution = bpy.props.EnumProperty(
+        name="Texture Resolution",
+        description="Target texture resolution",
+        items=[
+            ('512', "512", "512x512"),
+            ('1024', "1K (1024)", "1024x1024"),
+            ('2048', "2K (2048)", "2048x2048"),
+            ('4096', "4K (4096)", "4096x4096"),
+            ('8192', "8K (8192)", "8192x8192"),
+        ],
+        default='2048'
+    )
+
+    bpy.types.Scene.texelDensityPresetMeters = bpy.props.EnumProperty(
+        name="Texel Density (px/m)",
+        description="Texel density in pixels per meter",
+        items=[
+            ('10.24', "10.24 px/m", "Very low detail - Large background objects"),
+            ('20.48', "20.48 px/m", "Low detail - Background objects"),
+            ('40.96', "40.96 px/m", "Medium-low detail"),
+            ('81.92', "81.92 px/m", "Medium detail"),
+            ('163.84', "163.84 px/m", "Medium-high detail"),
+            ('256', "256 px/m", "High detail"),
+            ('512', "512 px/m", "Very high detail"),
+            ('1024', "1024 px/m", "Extreme detail - Hero objects"),
+            ('2048', "2048 px/m", "Ultra detail"),
+            ('4096', "4096 px/m", "Maximum detail"),
+        ],
+        default='256'
+    )
+
+    bpy.types.Scene.texelDensityPresetCentimeters = bpy.props.EnumProperty(
+        name="Texel Density (px/cm)",
+        description="Texel density in pixels per centimeter",
+        items=[
+            ('0.512', "0.51 px/cm", "Very low detail - Large background objects"),
+            ('1.024', "1.02 px/cm", "Low detail - Background objects"),
+            ('2.048', "2.05 px/cm", "Medium-low detail"),
+            ('2.56', "2.56 px/cm", "Medium detail"),
+            ('4.096', "4.10 px/cm", "Medium-high detail"),
+            ('8.192', "8.19 px/cm", "High detail"),
+            ('10.24', "10.24 px/cm", "Very high detail"),
+            ('20.48', "20.48 px/cm", "Extreme detail - Hero objects"),
+            ('40.96', "40.96 px/cm", "Ultra detail"),
+            ('81.92', "81.92 px/cm", "Maximum detail"),
+        ],
+        default='2.56'
     )
 
     bpy.types.Scene.vertexDisplayBool = bpy.props.BoolProperty(
