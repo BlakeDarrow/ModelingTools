@@ -24,6 +24,7 @@ import bpy
 import math
 import random
 import bmesh
+import mathutils
 from bpy.types import Menu
 
 class DarrowToolPanel:
@@ -68,6 +69,14 @@ class DARROW_PT_toolPanel(DarrowToolPanel, bpy.types.Panel):
                     cf.enabled = False
                 else:
                     cf.enabled = True
+                
+                # LOD Generator button
+                box.separator()
+                lod_row = box.row(align=True)
+                lod_row.scale_y = 1.3
+                lod_row.operator('darrow.generate_lods', text="LOD Gen", icon="MOD_DECIM")
+                if len(objs) == 0:
+                    lod_row.enabled = False
 
 class DARROW_PT_toolExtendPanel(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolPanel"
@@ -315,6 +324,491 @@ class DARROW_PT_toolPanel_7(DarrowToolPanel, bpy.types.Panel):
 
         cf2.operator('view.create_orient', text="Set", icon="RESTRICT_SELECT_OFF")
         cf2.operator('clear.orientation', text="Clear", icon="TRASH")
+
+class DARROW_PT_toolPanel_8(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
+    bl_label = "Custom Properties"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        objs = context.selected_objects
+        layout = self.layout
+        col = layout.column(align=True)
+        col.scale_y = 1.33
+        btn = col.row(align=True)
+        btn.operator('darrow.set_is_cutter', text="Set is_cutter", icon="SCULPTMODE_HLT")
+        btn2 = col.row(align=True)
+        btn2.operator('darrow.set_static_bevel', text="Set static_bevel", icon="MOD_BEVEL")
+        if len(objs) == 0:
+            btn.enabled = False
+            btn2.enabled = False
+
+class DarrowSetIsCutter(bpy.types.Operator):
+    bl_idname = "darrow.set_is_cutter"
+    bl_label = "Set is_cutter"
+    bl_description = "Add 'is_cutter' custom property (True) to selected objects"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        objs = context.selected_objects
+        if len(objs) == 0:
+            self.report({'WARNING'}, "No objects selected")
+            return {'CANCELLED'}
+        for obj in objs:
+            obj["is_cutter"] = True
+        self.report({'INFO'}, f"Set 'is_cutter' on {len(objs)} object(s)")
+        return {'FINISHED'}
+
+class DarrowSetStaticBevel(bpy.types.Operator):
+    bl_idname = "darrow.set_static_bevel"
+    bl_label = "Set static_bevel"
+    bl_description = "Mark selected objects to preserve bevel segments during LOD generation"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        objs = context.selected_objects
+        if len(objs) == 0:
+            self.report({'WARNING'}, "No objects selected")
+            return {'CANCELLED'}
+        for obj in objs:
+            obj["set_static_bevel"] = True
+        self.report({'INFO'}, f"Set 'set_static_bevel' on {len(objs)} object(s)")
+        return {'FINISHED'}
+
+#-----------------------------------------------------#  
+#   LOD Generator
+#-----------------------------------------------------#
+
+class DARROW_PT_toolPanel_LOD(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
+    bl_label = "LOD Generator"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        all = bpy.data.objects
+        if len(all) != 0:
+            objs = context.selected_objects
+            layout = self.layout
+            scn = context.scene
+
+            prnt = layout.column(align=True)
+            prnt.scale_y = 1.33
+
+            # LOD Count
+            col = prnt.column(align=True)
+            col.prop(scn, "lodCount", text="LOD Levels", slider=True)
+            
+            # Final LOD Type
+            col.prop(scn, "lodFinalType", text="Final LOD")
+            
+            prnt.separator()
+            
+            # Dynamic LOD Ratios based on count
+            lod_count = scn.lodCount
+            if lod_count > 2:  # Only show ratios if there are intermediate LODs
+                ratio_box = prnt.column(align=True)
+                ratio_box.label(text="Decimation Ratios:")
+                ratio_col = ratio_box.column(align=True)
+                
+                # Show ratio sliders for intermediate LODs (not LOD0 or final)
+                ratio_props = ["lodRatio1", "lodRatio2", "lodRatio3", "lodRatio4", "lodRatio5"]
+                for i in range(1, lod_count - 1):
+                    if i <= len(ratio_props):
+                        ratio_col.prop(scn, ratio_props[i-1], text=f"LOD{i}")
+                
+                prnt.separator()
+            
+            # Options
+            opt_box = prnt.column(align=True)
+            opt_box.label(text="Options:")
+            opt_col = opt_box.column(align=True)
+            
+            row = opt_col.row(align=True)
+            row.prop(scn, "lodPreserveUVs", text="Preserve UVs", toggle=True)
+            row.prop(scn, "lodKeepMaterials", text="Materials", toggle=True)
+            
+            row = opt_col.row(align=True)
+            row.prop(scn, "lodTriangulate", text="Triangulate", toggle=True)
+            row.prop(scn, "lodApplyModifiers", text="Apply Mods", toggle=True)
+            
+            row = opt_col.row(align=True)
+            row.prop(scn, "lodShadeSmooth", text="Shade Smooth", toggle=True)
+            row.prop(scn, "lodSmartUnbevel", text="Un-Bevel", toggle=True)
+            
+            prnt.separator()
+            
+            # Generate button
+            gen = prnt.row(align=True)
+            gen.scale_y = 1.5
+            gen.operator("darrow.generate_lods", text="Generate LODs", icon="MOD_DECIM")
+            
+            # Enable/disable based on selection
+            valid_selection = False
+            for obj in objs:
+                if obj.type == 'MESH' or obj.type == 'EMPTY':
+                    valid_selection = True
+                    break
+                # Check if it's a collection instance or we have an active collection
+            
+            if len(objs) == 0:
+                gen.enabled = False
+            elif not valid_selection:
+                gen.enabled = False
+
+
+class DarrowGenerateLODs(bpy.types.Operator):
+    bl_idname = "darrow.generate_lods"
+    bl_label = "Generate LODs"
+    bl_description = "Generate LOD chain from selected Empty, Collection, or meshes"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def is_boolean_cutter(self, obj):
+        """Check if object is used as a boolean cutter anywhere in the scene"""
+        # Check for is_cutter custom property
+        if obj.get("is_cutter", False):
+            return True
+        
+        # Check if this object is used as a boolean operand by any other object
+        for scene_obj in bpy.data.objects:
+            if scene_obj.type == 'MESH':
+                for mod in scene_obj.modifiers:
+                    if mod.type == 'BOOLEAN' and mod.object == obj:
+                        return True
+        return False
+
+    def should_skip_object(self, obj):
+        """Check if object should be skipped for LOD generation"""
+        # Skip if render is disabled
+        if obj.hide_render:
+            return True
+        # Skip if it's a boolean cutter
+        if self.is_boolean_cutter(obj):
+            return True
+        return False
+
+    def get_meshes_recursive(self, obj):
+        """Recursively get all mesh children of an object, skipping render-disabled and cutters"""
+        meshes = []
+        if obj.type == 'MESH' and not self.should_skip_object(obj):
+            meshes.append(obj)
+        for child in obj.children:
+            meshes.extend(self.get_meshes_recursive(child))
+        return meshes
+
+    def get_collection_meshes_recursive(self, collection):
+        """Recursively get all meshes from a collection and its children"""
+        meshes = []
+        for obj in collection.objects:
+            if obj.type == 'MESH' and not self.should_skip_object(obj):
+                meshes.append(obj)
+        for child_col in collection.children:
+            meshes.extend(self.get_collection_meshes_recursive(child_col))
+        return meshes
+
+    def create_bounding_box(self, source_obj, name):
+        """Create a bounding box mesh from source object"""
+        # Get bounding box corners in world space
+        bbox_corners = [source_obj.matrix_world @ mathutils.Vector(corner) for corner in source_obj.bound_box]
+        
+        # Create mesh from bounding box
+        mesh = bpy.data.meshes.new(name)
+        
+        # Define vertices (8 corners of bounding box)
+        verts = [corner[:] for corner in bbox_corners]
+        
+        # Define faces (6 faces of the box)
+        faces = [
+            (0, 1, 2, 3),  # bottom
+            (4, 7, 6, 5),  # top
+            (0, 4, 5, 1),  # front
+            (2, 6, 7, 3),  # back
+            (0, 3, 7, 4),  # left
+            (1, 5, 6, 2),  # right
+        ]
+        
+        mesh.from_pydata(verts, [], faces)
+        mesh.update()
+        
+        # Create object
+        bbox_obj = bpy.data.objects.new(name, mesh)
+        bbox_obj.location = (0, 0, 0)
+        
+        return bbox_obj
+
+    def create_convex_hull(self, source_obj, name):
+        """Create a convex hull mesh from source object"""
+        # Create a copy of the mesh
+        mesh = source_obj.data.copy()
+        hull_obj = bpy.data.objects.new(name, mesh)
+        hull_obj.matrix_world = source_obj.matrix_world.copy()
+        
+        # Link temporarily to apply convex hull
+        bpy.context.collection.objects.link(hull_obj)
+        bpy.context.view_layer.objects.active = hull_obj
+        hull_obj.select_set(True)
+        
+        # Enter edit mode and create convex hull
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.convex_hull()
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Unlink from current collection (will be linked to LOD collection later)
+        bpy.context.collection.objects.unlink(hull_obj)
+        
+        return hull_obj
+
+    def execute(self, context):
+        scn = context.scene
+        selected = context.selected_objects
+        
+        if len(selected) == 0:
+            self.report({'ERROR'}, "Nothing selected")
+            return {'CANCELLED'}
+        
+        # Determine source meshes and base name
+        source_meshes = []
+        base_name = ""
+        
+        # Check if we have an Empty selected
+        empty_selected = None
+        for obj in selected:
+            if obj.type == 'EMPTY':
+                empty_selected = obj
+                break
+        
+        if empty_selected:
+            # Get all mesh children recursively
+            source_meshes = self.get_meshes_recursive(empty_selected)
+            base_name = empty_selected.name
+            if len(source_meshes) == 0:
+                self.report({'ERROR'}, "Empty has no valid mesh children (check render visibility and boolean cutters)")
+                return {'CANCELLED'}
+        else:
+            # Check for mesh selection
+            mesh_count = 0
+            for obj in selected:
+                if obj.type == 'MESH' and not self.should_skip_object(obj):
+                    source_meshes.append(obj)
+                    mesh_count += 1
+            
+            if mesh_count == 0:
+                self.report({'ERROR'}, "No valid meshes found (check render visibility and boolean cutters)")
+                return {'CANCELLED'}
+            
+            if mesh_count > 1:
+                # Multiple meshes require a common parent Empty
+                parents = set()
+                for obj in source_meshes:
+                    if obj.parent and obj.parent.type == 'EMPTY':
+                        parents.add(obj.parent)
+                
+                if len(parents) == 1:
+                    base_name = list(parents)[0].name
+                else:
+                    self.report({'ERROR'}, "Multiple meshes selected - please select their parent Empty instead")
+                    return {'CANCELLED'}
+            else:
+                base_name = source_meshes[0].name
+        
+        # Create LOD collection
+        lod_collection_name = f"{base_name}_LODs"
+        if lod_collection_name in bpy.data.collections:
+            # Remove existing LOD collection
+            old_col = bpy.data.collections[lod_collection_name]
+            for obj in old_col.objects:
+                bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.collections.remove(old_col)
+        
+        lod_collection = bpy.data.collections.new(lod_collection_name)
+        bpy.context.scene.collection.children.link(lod_collection)
+        lod_collection.color_tag = 'COLOR_04'
+        
+        # Store original selection state
+        original_active = context.view_layer.objects.active
+        
+        # Deselect all
+        bpy.ops.object.select_all(action='DESELECT')
+        
+        # Select source meshes for joining
+        for obj in source_meshes:
+            obj.select_set(True)
+        context.view_layer.objects.active = source_meshes[0]
+        
+        # Duplicate and join for LOD0
+        bpy.ops.object.duplicate()
+        duplicates = context.selected_objects
+        
+        # Smart Un-Bevel: reduce all bevel segments to 1 (including on boolean cutters)
+        # Skip objects with set_static_bevel custom property
+        cutter_bevel_backup = {}  # Store original bevel segments for cutters
+        if scn.lodSmartUnbevel:
+            for obj in duplicates:
+                # Skip if object has set_static_bevel
+                if obj.get("set_static_bevel", False):
+                    continue
+                for mod in obj.modifiers:
+                    if mod.type == 'BEVEL':
+                        mod.segments = 1
+                    # Also handle boolean cutters
+                    if mod.type == 'BOOLEAN' and mod.object:
+                        cutter = mod.object
+                        # Skip cutter if it has set_static_bevel
+                        if cutter.get("set_static_bevel", False):
+                            continue
+                        if cutter not in cutter_bevel_backup:
+                            cutter_bevel_backup[cutter] = {}
+                        for cutter_mod in cutter.modifiers:
+                            if cutter_mod.type == 'BEVEL':
+                                # Backup original segments
+                                if cutter_mod.name not in cutter_bevel_backup[cutter]:
+                                    cutter_bevel_backup[cutter][cutter_mod.name] = cutter_mod.segments
+                                cutter_mod.segments = 1
+        
+        # Apply modifiers if requested
+        if scn.lodApplyModifiers:
+            for obj in duplicates:
+                context.view_layer.objects.active = obj
+                for mod in obj.modifiers[:]:
+                    try:
+                        bpy.ops.object.modifier_apply(modifier=mod.name)
+                    except:
+                        pass
+        
+        # Restore cutter bevel segments
+        for cutter, mods in cutter_bevel_backup.items():
+            for mod_name, segments in mods.items():
+                if mod_name in cutter.modifiers:
+                    cutter.modifiers[mod_name].segments = segments
+        
+        # Join duplicates into LOD0
+        if len(duplicates) > 1:
+            context.view_layer.objects.active = duplicates[0]
+            bpy.ops.object.join()
+        
+        lod0 = context.active_object
+        lod0.name = f"{base_name}_LOD0"
+        lod0.data.name = f"{base_name}_LOD0"
+        
+        # Move LOD0 to LOD collection
+        for col in lod0.users_collection:
+            col.objects.unlink(lod0)
+        lod_collection.objects.link(lod0)
+        
+        # Clear parent
+        lod0.parent = None
+        lod0.matrix_world = lod0.matrix_world
+        
+        # Triangulate if requested
+        if scn.lodTriangulate:
+            context.view_layer.objects.active = lod0
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Generate intermediate LODs
+        lod_count = scn.lodCount
+        lods_created = [lod0]
+        
+        # Get ratios from scene properties (shown dynamically in panel)
+        lod_ratios = [1.0, scn.lodRatio1, scn.lodRatio2, scn.lodRatio3, scn.lodRatio4, scn.lodRatio5]
+        
+        for i in range(1, lod_count - 1):
+            # Use ratio from scene properties
+            ratio = lod_ratios[i] if i < len(lod_ratios) else 0.05
+            ratio = max(0.01, ratio)  # Minimum 1%
+            
+            # Duplicate LOD0 for this LOD level
+            bpy.ops.object.select_all(action='DESELECT')
+            lod0.select_set(True)
+            context.view_layer.objects.active = lod0
+            bpy.ops.object.duplicate()
+            
+            lod_n = context.active_object
+            lod_n.name = f"{base_name}_LOD{i}"
+            lod_n.data = lod_n.data.copy()  # Make unique mesh data
+            lod_n.data.name = f"{base_name}_LOD{i}"
+            
+            # Add decimate modifier
+            decimate = lod_n.modifiers.new(name="LOD_Decimate", type='DECIMATE')
+            decimate.decimate_type = 'COLLAPSE'
+            decimate.ratio = ratio
+            if scn.lodPreserveUVs:
+                decimate.use_collapse_triangulate = False
+            
+            # Apply modifier
+            context.view_layer.objects.active = lod_n
+            bpy.ops.object.modifier_apply(modifier="LOD_Decimate")
+            
+            # Move to LOD collection
+            for col in lod_n.users_collection:
+                col.objects.unlink(lod_n)
+            lod_collection.objects.link(lod_n)
+            
+            lods_created.append(lod_n)
+        
+        # Generate final LOD (bounding box or convex hull)
+        final_lod_name = f"{base_name}_LOD{lod_count - 1}"
+        
+        if scn.lodFinalType == 'BBOX':
+            final_lod = self.create_bounding_box(lod0, final_lod_name)
+        else:  # CONVEX
+            final_lod = self.create_convex_hull(lod0, final_lod_name)
+        
+        # Link final LOD to collection
+        lod_collection.objects.link(final_lod)
+        
+        # Copy materials if requested
+        if scn.lodKeepMaterials and lod0.data.materials:
+            for mat in lod0.data.materials:
+                if mat and mat.name not in [m.name for m in final_lod.data.materials if m]:
+                    final_lod.data.materials.append(mat)
+        
+        lods_created.append(final_lod)
+        
+        # Copy materials to all LODs if requested
+        if scn.lodKeepMaterials:
+            for lod in lods_created[1:]:  # Skip LOD0, it already has materials
+                if lod != final_lod:  # Skip final, handled above
+                    lod.data.materials.clear()
+                    for mat in lod0.data.materials:
+                        lod.data.materials.append(mat)
+        
+        # Add Weighted Normal and Smooth by Angle modifiers to all LODs (if Shade Smooth enabled)
+        if scn.lodShadeSmooth:
+            for lod in lods_created:
+                if lod.type == 'MESH':
+                    bpy.ops.object.select_all(action='DESELECT')
+                    lod.select_set(True)
+                    context.view_layer.objects.active = lod
+                    
+                    # Clear all sharp edges first
+                    #bm = bmesh.new()
+                    #bm.from_mesh(lod.data)
+                    #for edge in bm.edges:
+                    #    edge.smooth = True  # Clear sharp (smooth = True means NOT sharp)
+                    #bm.to_mesh(lod.data)
+                    #bm.free()
+                    #lod.data.update()
+                    
+                    # Apply auto smooth shading (Blender 5.0)
+                    bpy.ops.object.shade_auto_smooth()
+                    
+                    # Add Weighted Normal modifier
+                    if not any(mod.type == 'WEIGHTED_NORMAL' for mod in lod.modifiers):
+                        weighted_normal = lod.modifiers.new(name="Weighted Normal", type='WEIGHTED_NORMAL')
+                        weighted_normal.mode = "CORNER_ANGLE"
+                        weighted_normal.keep_sharp = True
+        
+        # Select all created LODs
+        bpy.ops.object.select_all(action='DESELECT')
+        for lod in lods_created:
+            lod.select_set(True)
+        context.view_layer.objects.active = lods_created[0]
+        
+        self.report({'INFO'}, f"Generated {lod_count} LODs in '{lod_collection_name}'")
+        return {'FINISHED'}
 
 class DarrowMoveOnGrid(bpy.types.Operator):
     bl_label = "Align on Grid"
@@ -894,9 +1388,11 @@ class DarrowSmooth(bpy.types.Operator):
                 if obj.type == "MESH":
                     obj.select_set(state=True)
                     bpy.context.view_layer.objects.active = obj
-                    bpy.ops.object.shade_smooth()
-                    bpy.context.object.data.use_auto_smooth = True
-                    bpy.context.object.data.auto_smooth_angle = 3.14159
+                    # Use shade_smooth_by_angle for Blender 4.1+
+                    try:
+                        bpy.ops.object.shade_smooth_by_angle(angle=3.14159)
+                    except:
+                        bpy.ops.object.shade_smooth()
                     obj.select_set(state=False)
             
             for obj in objs:
@@ -925,9 +1421,11 @@ class DarrowSharp(bpy.types.Operator):
                 if obj.type == "MESH":
                     obj.select_set(state=True)
                     bpy.context.view_layer.objects.active = obj
-                    bpy.ops.object.shade_smooth()
-                    bpy.context.object.data.use_auto_smooth = True
-                    bpy.context.object.data.auto_smooth_angle = 0
+                    # Use shade_smooth_by_angle with 0 for sharp look
+                    try:
+                        bpy.ops.object.shade_smooth_by_angle(angle=0)
+                    except:
+                        bpy.ops.object.shade_flat()
                     obj.select_set(state=False)
 
             for obj in objs:
@@ -1395,7 +1893,7 @@ class ModelingToolsPopUpCallback(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth,
+classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowGenerateLODs,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
 
 addon_keymaps = []
@@ -1578,6 +2076,103 @@ def register():
     bpy.types.Scene.fixNgons = bpy.props.BoolProperty(
         name = "Tris to quads",
         default = False
+    )
+
+    # LOD Generator Properties
+    bpy.types.Scene.lodCount = bpy.props.IntProperty(
+        name="LOD Count",
+        description="Number of LOD levels to generate",
+        default=4,
+        min=2,
+        max=6
+    )
+
+    bpy.types.Scene.lodFinalType = bpy.props.EnumProperty(
+        name="Final LOD Type",
+        description="Type of geometry for the final (lowest) LOD",
+        items=[
+            ('BBOX', "Bounding Box", "Simple box matching object bounds"),
+            ('CONVEX', "Convex Hull", "Convex hull wrapping the object"),
+        ],
+        default='BBOX'
+    )
+
+    bpy.types.Scene.lodPreserveUVs = bpy.props.BoolProperty(
+        name="Preserve UVs",
+        description="Try to preserve UV coordinates during decimation",
+        default=True
+    )
+
+    bpy.types.Scene.lodKeepMaterials = bpy.props.BoolProperty(
+        name="Keep Materials",
+        description="Copy materials to all LOD levels",
+        default=True
+    )
+
+    bpy.types.Scene.lodTriangulate = bpy.props.BoolProperty(
+        name="Triangulate",
+        description="Convert all faces to triangles (for game engine export)",
+        default=False
+    )
+
+    bpy.types.Scene.lodApplyModifiers = bpy.props.BoolProperty(
+        name="Apply Modifiers",
+        description="Apply all modifiers before combining meshes",
+        default=True
+    )
+
+    bpy.types.Scene.lodShadeSmooth = bpy.props.BoolProperty(
+        name="Shade Smooth",
+        description="Apply smooth shading to generated LODs",
+        default=True
+    )
+
+    bpy.types.Scene.lodSmartUnbevel = bpy.props.BoolProperty(
+        name="Smart Un-Bevel",
+        description="Reduce all bevel modifiers to 1 segment before LOD generation (includes boolean cutters)",
+        default=False
+    )
+
+    # LOD Decimation Ratios (per-scene, shown dynamically in panel)
+    bpy.types.Scene.lodRatio1 = bpy.props.FloatProperty(
+        name="LOD1 Ratio",
+        description="Decimation ratio for LOD1 (1.0 = 100%)",
+        default=0.5,
+        min=0.01,
+        max=1.0,
+        precision=2
+    )
+    bpy.types.Scene.lodRatio2 = bpy.props.FloatProperty(
+        name="LOD2 Ratio",
+        description="Decimation ratio for LOD2 (1.0 = 100%)",
+        default=0.25,
+        min=0.01,
+        max=1.0,
+        precision=2
+    )
+    bpy.types.Scene.lodRatio3 = bpy.props.FloatProperty(
+        name="LOD3 Ratio",
+        description="Decimation ratio for LOD3 (1.0 = 100%)",
+        default=0.125,
+        min=0.01,
+        max=1.0,
+        precision=2
+    )
+    bpy.types.Scene.lodRatio4 = bpy.props.FloatProperty(
+        name="LOD4 Ratio",
+        description="Decimation ratio for LOD4 (1.0 = 100%)",
+        default=0.0625,
+        min=0.01,
+        max=1.0,
+        precision=2
+    )
+    bpy.types.Scene.lodRatio5 = bpy.props.FloatProperty(
+        name="LOD5 Ratio",
+        description="Decimation ratio for LOD5 (1.0 = 100%)",
+        default=0.03,
+        min=0.01,
+        max=1.0,
+        precision=2
     )
 
 def unregister():
