@@ -339,9 +339,12 @@ class DARROW_PT_toolPanel_8(DarrowToolPanel, bpy.types.Panel):
         btn.operator('darrow.set_is_cutter', text="Set is_cutter", icon="SCULPTMODE_HLT")
         btn2 = col.row(align=True)
         btn2.operator('darrow.set_static_bevel', text="Set static_bevel", icon="MOD_BEVEL")
+        btn3 = col.row(align=True)
+        btn3.operator('darrow.set_cull_out', text="Set cull_out", icon="GHOST_DISABLED")
         if len(objs) == 0:
             btn.enabled = False
             btn2.enabled = False
+            btn3.enabled = False
 
 class DarrowSetIsCutter(bpy.types.Operator):
     bl_idname = "darrow.set_is_cutter"
@@ -373,6 +376,22 @@ class DarrowSetStaticBevel(bpy.types.Operator):
         for obj in objs:
             obj["set_static_bevel"] = True
         self.report({'INFO'}, f"Set 'set_static_bevel' on {len(objs)} object(s)")
+        return {'FINISHED'}
+
+class DarrowSetCullOut(bpy.types.Operator):
+    bl_idname = "darrow.set_cull_out"
+    bl_label = "Set cull_out"
+    bl_description = "Mark objects to be excluded from LOD1+ (both as geometry and as boolean cutters)"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        objs = context.selected_objects
+        if len(objs) == 0:
+            self.report({'WARNING'}, "No objects selected")
+            return {'CANCELLED'}
+        for obj in objs:
+            obj["cull_out"] = True
+        self.report({'INFO'}, f"Set 'cull_out' on {len(objs)} object(s)")
         return {'FINISHED'}
 
 #-----------------------------------------------------#  
@@ -654,6 +673,42 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     mod.show_viewport = state['show_viewport']
                     mod.show_render = state['show_render']
 
+    def backup_and_disable_cull_out_booleans(self, source_objects):
+        """Disable boolean modifiers that reference objects with cull_out=True.
+        Returns backup dict for restoration."""
+        bool_backup = {}  # {obj: {mod_name: {show_viewport, show_render}}}
+        
+        for obj in source_objects:
+            if obj.type != 'MESH':
+                continue
+            
+            for mod in obj.modifiers:
+                if mod.type == 'BOOLEAN' and mod.object:
+                    cutter = mod.object
+                    # Check if the cutter has cull_out property
+                    if cutter.get("cull_out", False):
+                        if obj not in bool_backup:
+                            bool_backup[obj] = {}
+                        if mod.name not in bool_backup[obj]:
+                            bool_backup[obj][mod.name] = {
+                                'show_viewport': mod.show_viewport,
+                                'show_render': mod.show_render
+                            }
+                        # Disable the boolean modifier
+                        mod.show_viewport = False
+                        mod.show_render = False
+        
+        return bool_backup
+
+    def restore_cull_out_booleans(self, bool_backup):
+        """Restore boolean modifier state from backup."""
+        for obj, mods in bool_backup.items():
+            for mod_name, state in mods.items():
+                if mod_name in obj.modifiers:
+                    mod = obj.modifiers[mod_name]
+                    mod.show_viewport = state['show_viewport']
+                    mod.show_render = state['show_render']
+
     def extract_evaluated_geometry(self, context, source_objects):
         """Extract all evaluated geometry from source objects using depsgraph.
         Returns combined bmesh and list of collected materials."""
@@ -840,17 +895,34 @@ class DarrowGenerateLODs(bpy.types.Operator):
             lod0.data.update()
         
         # === LOD1+ BASE MESH ===
-        # LOD0 keeps original bevels. LOD1+ respects Un-Bevel setting:
-        # - Un-Bevel enabled (True): LOD1+ have no bevels (disabled)
-        # - Un-Bevel disabled (False): LOD1+ have bevels at 1 segment
+        # LOD0 keeps everything. LOD1+ respects:
+        # - Un-Bevel: disable/reduce bevels
+        # - cull_out: exclude objects marked with cull_out (both as geometry and boolean cutters)
         lod1_base_mesh = None
-        bevel_backup = self.backup_and_reduce_bevels(source_meshes, disable_completely=scn.lodSmartUnbevel)
         
-        if bevel_backup:
-            context.view_layer.update()
+        # Filter out cull_out objects for LOD1+ source
+        lod1_source_meshes = [obj for obj in source_meshes if not obj.get("cull_out", False)]
+        
+        # Backup and modify bevels
+        bevel_backup = self.backup_and_reduce_bevels(lod1_source_meshes, disable_completely=scn.lodSmartUnbevel)
+        
+        # Backup and disable boolean modifiers that reference cull_out objects
+        bool_backup = self.backup_and_disable_cull_out_booleans(lod1_source_meshes)
+        
+        # Check if we need to create a separate LOD1 base (bevels modified OR cull_out objects exist)
+        needs_separate_lod1_base = bevel_backup or bool_backup or len(lod1_source_meshes) < len(source_meshes)
+        
+        if needs_separate_lod1_base:
+            if bevel_backup or bool_backup:
+                context.view_layer.update()
             
-            lod1_bm, _, _ = self.extract_evaluated_geometry(context, source_meshes)
-            self.restore_bevels(bevel_backup)
+            lod1_bm, _, _ = self.extract_evaluated_geometry(context, lod1_source_meshes)
+            
+            # Restore modifiers
+            if bevel_backup:
+                self.restore_bevels(bevel_backup)
+            if bool_backup:
+                self.restore_cull_out_booleans(bool_backup)
             
             if lod1_bm.faces:
                 lod1_base_mesh = bpy.data.meshes.new(f"{base_name}_LOD1_base_temp")
@@ -2081,7 +2153,7 @@ class ModelingToolsPopUpCallback(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowGenerateLODs,
+classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowSetCullOut, DarrowGenerateLODs,
            DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
 
 addon_keymaps = []
