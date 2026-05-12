@@ -587,10 +587,36 @@ class DarrowGenerateLODs(bpy.types.Operator):
         
         return hull_obj
 
-    def backup_and_reduce_bevels(self, source_objects):
-        """Backup bevel segments and reduce to 1 on source objects and their boolean cutters.
+    def backup_and_reduce_bevels(self, source_objects, disable_completely=False):
+        """Backup bevel modifier state and modify on source objects and their boolean cutters.
+        
+        Args:
+            source_objects: Objects to process
+            disable_completely: If True, disable bevel modifiers (show_viewport=False, show_render=False).
+                               If False, reduce segments to 1.
+        
         Returns dict for restoration."""
-        bevel_backup = {}  # {obj: {mod_name: segments}}
+        bevel_backup = {}  # {obj: {mod_name: {segments, show_viewport, show_render}}}
+        
+        def backup_and_modify_bevel(target_obj, bevel_mod):
+            """Helper to backup and modify a single bevel modifier."""
+            if target_obj not in bevel_backup:
+                bevel_backup[target_obj] = {}
+            if bevel_mod.name not in bevel_backup[target_obj]:
+                # Store all relevant state
+                bevel_backup[target_obj][bevel_mod.name] = {
+                    'segments': bevel_mod.segments,
+                    'show_viewport': bevel_mod.show_viewport,
+                    'show_render': bevel_mod.show_render
+                }
+            
+            if disable_completely:
+                # Disable modifier entirely
+                bevel_mod.show_viewport = False
+                bevel_mod.show_render = False
+            else:
+                # Just reduce segments to 1
+                bevel_mod.segments = 1
         
         for obj in source_objects:
             # Skip if object has set_static_bevel
@@ -601,13 +627,9 @@ class DarrowGenerateLODs(bpy.types.Operator):
                 continue
                 
             for mod in obj.modifiers:
-                # Reduce bevel segments on the object itself
+                # Handle bevel modifiers on the object itself
                 if mod.type == 'BEVEL':
-                    if obj not in bevel_backup:
-                        bevel_backup[obj] = {}
-                    if mod.name not in bevel_backup[obj]:
-                        bevel_backup[obj][mod.name] = mod.segments
-                    mod.segments = 1
+                    backup_and_modify_bevel(obj, mod)
                 
                 # Also handle boolean cutters
                 if mod.type == 'BOOLEAN' and mod.object:
@@ -618,20 +640,19 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     
                     for cutter_mod in cutter.modifiers:
                         if cutter_mod.type == 'BEVEL':
-                            if cutter not in bevel_backup:
-                                bevel_backup[cutter] = {}
-                            if cutter_mod.name not in bevel_backup[cutter]:
-                                bevel_backup[cutter][cutter_mod.name] = cutter_mod.segments
-                            cutter_mod.segments = 1
+                            backup_and_modify_bevel(cutter, cutter_mod)
         
         return bevel_backup
 
     def restore_bevels(self, bevel_backup):
-        """Restore bevel segments from backup."""
+        """Restore bevel modifier state from backup."""
         for obj, mods in bevel_backup.items():
-            for mod_name, segments in mods.items():
+            for mod_name, state in mods.items():
                 if mod_name in obj.modifiers:
-                    obj.modifiers[mod_name].segments = segments
+                    mod = obj.modifiers[mod_name]
+                    mod.segments = state['segments']
+                    mod.show_viewport = state['show_viewport']
+                    mod.show_render = state['show_render']
 
     def extract_evaluated_geometry(self, context, source_objects):
         """Extract all evaluated geometry from source objects using depsgraph.
@@ -788,18 +809,8 @@ class DarrowGenerateLODs(bpy.types.Operator):
         
         # === DEPSGRAPH-BASED LOD0 GENERATION ===
         
-        # Smart Un-Bevel: temporarily reduce bevel segments on ORIGINAL objects
-        # DISABLED - modifying source objects can corrupt depsgraph
-        bevel_backup = {}
-        # if scn.lodSmartUnbevel:
-        #     bevel_backup = self.backup_and_reduce_bevels(source_meshes)
-        
-        # Extract evaluated geometry from depsgraph (captures geo nodes, booleans, etc.)
+        # LOD0 captures original geometry with bevels untouched
         combined_bm, collected_materials, instance_count = self.extract_evaluated_geometry(context, source_meshes)
-        
-        # Restore original bevel segments
-        # if bevel_backup:
-        #     self.restore_bevels(bevel_backup)
         
         if instance_count == 0 or not combined_bm.faces:
             combined_bm.free()
@@ -828,9 +839,44 @@ class DarrowGenerateLODs(bpy.types.Operator):
             bm.free()
             lod0.data.update()
         
+        # === LOD1+ BASE MESH ===
+        # LOD0 keeps original bevels. LOD1+ respects Un-Bevel setting:
+        # - Un-Bevel enabled (True): LOD1+ have no bevels (disabled)
+        # - Un-Bevel disabled (False): LOD1+ have bevels at 1 segment
+        lod1_base_mesh = None
+        bevel_backup = self.backup_and_reduce_bevels(source_meshes, disable_completely=scn.lodSmartUnbevel)
+        
+        if bevel_backup:
+            context.view_layer.update()
+            
+            lod1_bm, _, _ = self.extract_evaluated_geometry(context, source_meshes)
+            self.restore_bevels(bevel_backup)
+            
+            if lod1_bm.faces:
+                lod1_base_mesh = bpy.data.meshes.new(f"{base_name}_LOD1_base_temp")
+                lod1_bm.to_mesh(lod1_base_mesh)
+                lod1_bm.free()
+                
+                # Add materials to LOD1 base
+                for mat in collected_materials:
+                    lod1_base_mesh.materials.append(mat)
+                
+                # Triangulate LOD1 base if requested
+                if scn.lodTriangulate:
+                    bm = bmesh.new()
+                    bm.from_mesh(lod1_base_mesh)
+                    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+                    bm.to_mesh(lod1_base_mesh)
+                    bm.free()
+            else:
+                lod1_bm.free()
+        
         # Generate intermediate LODs
         lod_count = scn.lodCount
         lods_created = [lod0]
+        
+        # Determine base mesh for LOD1+ decimation
+        decimation_base = lod1_base_mesh if lod1_base_mesh else lod0.data
         
         # Get ratios from scene properties
         lod_ratios = [1.0, scn.lodRatio1, scn.lodRatio2, scn.lodRatio3, scn.lodRatio4, scn.lodRatio5]
@@ -839,8 +885,8 @@ class DarrowGenerateLODs(bpy.types.Operator):
             ratio = lod_ratios[i] if i < len(lod_ratios) else 0.05
             ratio = max(0.01, ratio)
             
-            # Create decimated LOD mesh directly
-            lod_mesh = lod0.data.copy()
+            # Create decimated LOD mesh from appropriate base
+            lod_mesh = decimation_base.copy()
             lod_mesh.name = f"{base_name}_LOD{i}_temp"
             
             # Create temp object for decimation
@@ -909,33 +955,58 @@ class DarrowGenerateLODs(bpy.types.Operator):
         if shade_smooth_enabled:
             for lod in lods_created:
                 if lod and lod.type == 'MESH' and lod.data:
-                    print(f"DEBUG: Applying shade_auto_smooth to {lod.name}")
+                    print(f"DEBUG: Adding modifier stack to {lod.name}")
                     # Select only this LOD
                     bpy.ops.object.select_all(action='DESELECT')
                     lod.select_set(True)
                     context.view_layer.objects.active = lod
                     
-                    # Merge by distance (remove doubles) using bmesh
-                    bm = bmesh.new()
-                    bm.from_mesh(lod.data)
-                    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
-                    bm.to_mesh(lod.data)
-                    bm.free()
-                    lod.data.update()
-                    
                     # Apply auto smooth shading
                     bpy.ops.object.shade_auto_smooth()
                     
-                    # Add Weighted Normal modifier
+                    # === MODIFIER STACK ===
+                    # 0: Weld modifier
+                    weld = lod.modifiers.new(name="Weld", type='WELD')
+                    weld.merge_threshold = 0.0001
+                    
+                    # 1: Decimate (Planar, angle limit 5 degrees)
+                    decimate = lod.modifiers.new(name="Decimate", type='DECIMATE')
+                    decimate.decimate_type = 'DISSOLVE'
+                    decimate.angle_limit = math.radians(5)
+                    
+                    # 2: Triangulate (Beauty)
+                    triangulate = lod.modifiers.new(name="Triangulate", type='TRIANGULATE')
+                    triangulate.quad_method = 'BEAUTY'
+                    triangulate.ngon_method = 'BEAUTY'
+                    
+                    # 3: Weighted Normal
                     wn = lod.modifiers.new(name="Weighted Normal", type='WEIGHTED_NORMAL')
                     wn.mode = 'CORNER_ANGLE'
                     wn.keep_sharp = True
-                    print(f"DEBUG: Added Weighted Normal to {lod.name}")
+                    
+                    # 4: Smooth by Angle
+                    smooth = lod.modifiers.new(name="Smooth by Angle", type='NODES')
+                    # Use the built-in Smooth by Angle geometry nodes modifier
+                    try:
+                        smooth.node_group = bpy.data.node_groups.get('Smooth by Angle')
+                        if smooth.node_group is None:
+                            # Create it by invoking the operator if it doesn't exist
+                            bpy.ops.object.modifier_add_node_group(asset_library_type='ESSENTIALS', asset_library_identifier="", relative_asset_identifier="geometry_nodes\\smooth_by_angle.blend\\NodeTree\\Smooth by Angle")
+                    except:
+                        # Fallback: just mark as smooth shading if geo nodes fails
+                        lod.modifiers.remove(smooth)
+                        print(f"DEBUG: Could not add Smooth by Angle geo nodes to {lod.name}")
+                    
+                    print(f"DEBUG: Added modifier stack to {lod.name}")
         
         # Select created LODs (direct API, no operators)
         for lod in lods_created:
             lod.select_set(True)
         context.view_layer.objects.active = lods_created[0]
+        
+        # Cleanup temporary LOD1 base mesh if created
+        if lod1_base_mesh:
+            bpy.data.meshes.remove(lod1_base_mesh)
         
         self.report({'INFO'}, f"Generated {lod_count} LODs in '{lod_collection_name}'")
         return {'FINISHED'}
@@ -2259,8 +2330,8 @@ def register():
 
     bpy.types.Scene.lodSmartUnbevel = bpy.props.BoolProperty(
         name="Smart Un-Bevel",
-        description="Reduce all bevel modifiers to 1 segment before LOD generation (includes boolean cutters)",
-        default=False
+        description="LOD0 keeps original bevels. When enabled: LOD1+ have no bevels. When disabled: LOD1+ have bevels at 1 segment. Respects set_static_bevel",
+        default=True
     )
 
     # LOD Decimation Ratios (per-scene, shown dynamically in panel)
