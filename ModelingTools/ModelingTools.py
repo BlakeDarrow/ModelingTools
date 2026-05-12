@@ -961,9 +961,6 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     lod.select_set(True)
                     context.view_layer.objects.active = lod
                     
-                    # Apply auto smooth shading
-                    bpy.ops.object.shade_auto_smooth()
-                    
                     # === MODIFIER STACK ===
                     # 0: Weld modifier
                     weld = lod.modifiers.new(name="Weld", type='WELD')
@@ -984,18 +981,8 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     wn.mode = 'CORNER_ANGLE'
                     wn.keep_sharp = True
                     
-                    # 4: Smooth by Angle
-                    smooth = lod.modifiers.new(name="Smooth by Angle", type='NODES')
-                    # Use the built-in Smooth by Angle geometry nodes modifier
-                    try:
-                        smooth.node_group = bpy.data.node_groups.get('Smooth by Angle')
-                        if smooth.node_group is None:
-                            # Create it by invoking the operator if it doesn't exist
-                            bpy.ops.object.modifier_add_node_group(asset_library_type='ESSENTIALS', asset_library_identifier="", relative_asset_identifier="geometry_nodes\\smooth_by_angle.blend\\NodeTree\\Smooth by Angle")
-                    except:
-                        # Fallback: just mark as smooth shading if geo nodes fails
-                        lod.modifiers.remove(smooth)
-                        print(f"DEBUG: Could not add Smooth by Angle geo nodes to {lod.name}")
+                    # 4: Smooth by Angle (shade_auto_smooth adds the geo nodes modifier)
+                    bpy.ops.object.shade_auto_smooth()
                     
                     print(f"DEBUG: Added modifier stack to {lod.name}")
         
