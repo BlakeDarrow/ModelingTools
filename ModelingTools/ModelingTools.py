@@ -486,10 +486,14 @@ class DarrowGenerateLODs(bpy.types.Operator):
             return True
         return False
 
+    def is_convertible_to_mesh(self, obj):
+        """Check if object type can be converted to mesh"""
+        return obj.type in {'CURVE', 'SURFACE', 'FONT', 'META'}
+
     def get_meshes_recursive(self, obj):
         """Recursively get all mesh children of an object, skipping render-disabled and cutters"""
         meshes = []
-        if obj.type == 'MESH' and not self.should_skip_object(obj):
+        if (obj.type == 'MESH' or self.is_convertible_to_mesh(obj)) and not self.should_skip_object(obj):
             meshes.append(obj)
         for child in obj.children:
             meshes.extend(self.get_meshes_recursive(child))
@@ -499,7 +503,7 @@ class DarrowGenerateLODs(bpy.types.Operator):
         """Recursively get all meshes from a collection and its children"""
         meshes = []
         for obj in collection.objects:
-            if obj.type == 'MESH' and not self.should_skip_object(obj):
+            if (obj.type == 'MESH' or self.is_convertible_to_mesh(obj)) and not self.should_skip_object(obj):
                 meshes.append(obj)
         for child_col in collection.children:
             meshes.extend(self.get_collection_meshes_recursive(child_col))
@@ -527,6 +531,7 @@ class DarrowGenerateLODs(bpy.types.Operator):
         ]
         
         mesh.from_pydata(verts, [], faces)
+        mesh.validate()
         mesh.update()
         
         # Create object
@@ -536,31 +541,184 @@ class DarrowGenerateLODs(bpy.types.Operator):
         return bbox_obj
 
     def create_convex_hull(self, source_obj, name):
-        """Create a convex hull mesh from source object"""
-        # Create a copy of the mesh
-        mesh = source_obj.data.copy()
-        hull_obj = bpy.data.objects.new(name, mesh)
-        hull_obj.matrix_world = source_obj.matrix_world.copy()
+        """Create a convex hull mesh from source object using bmesh"""
+        # Get all vertex positions in world space from source mesh
+        source_mesh = source_obj.data
+        matrix = source_obj.matrix_world
         
-        # Link temporarily to apply convex hull
-        bpy.context.collection.objects.link(hull_obj)
-        bpy.context.view_layer.objects.active = hull_obj
-        hull_obj.select_set(True)
+        world_verts = [matrix @ mathutils.Vector(v.co) for v in source_mesh.vertices]
         
-        # Enter edit mode and create convex hull
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-        bpy.ops.mesh.convex_hull()
-        bpy.ops.object.mode_set(mode='OBJECT')
+        if len(world_verts) < 4:
+            # Not enough verts for convex hull, return copy
+            mesh = source_obj.data.copy()
+            hull_obj = bpy.data.objects.new(name, mesh)
+            return hull_obj
         
-        # Unlink from current collection (will be linked to LOD collection later)
-        bpy.context.collection.objects.unlink(hull_obj)
+        # Create bmesh and add vertices
+        bm = bmesh.new()
+        for co in world_verts:
+            bm.verts.new(co)
+        bm.verts.ensure_lookup_table()
+        
+        # Create convex hull using bmesh operator
+        try:
+            result = bmesh.ops.convex_hull(bm, input=bm.verts)
+            # Remove interior geometry
+            bmesh.ops.delete(bm, geom=result['geom_interior'], context='VERTS')
+        except Exception as e:
+            # Fallback: just use vertices as-is
+            bm.free()
+            mesh = source_obj.data.copy()
+            hull_obj = bpy.data.objects.new(name, mesh)
+            return hull_obj
+        
+        # Create new mesh from bmesh
+        hull_mesh = bpy.data.meshes.new(name)
+        bm.to_mesh(hull_mesh)
+        bm.free()
+        
+        # Ensure mesh is valid
+        hull_mesh.validate()
+        hull_mesh.update()
+        
+        # Create object (not linked to any collection yet)
+        hull_obj = bpy.data.objects.new(name, hull_mesh)
+        hull_obj.location = (0, 0, 0)  # Vertices are already in world space
         
         return hull_obj
 
+    def backup_and_reduce_bevels(self, source_objects):
+        """Backup bevel segments and reduce to 1 on source objects and their boolean cutters.
+        Returns dict for restoration."""
+        bevel_backup = {}  # {obj: {mod_name: segments}}
+        
+        for obj in source_objects:
+            # Skip if object has set_static_bevel
+            if obj.get("set_static_bevel", False):
+                continue
+            
+            if obj.type != 'MESH':
+                continue
+                
+            for mod in obj.modifiers:
+                # Reduce bevel segments on the object itself
+                if mod.type == 'BEVEL':
+                    if obj not in bevel_backup:
+                        bevel_backup[obj] = {}
+                    if mod.name not in bevel_backup[obj]:
+                        bevel_backup[obj][mod.name] = mod.segments
+                    mod.segments = 1
+                
+                # Also handle boolean cutters
+                if mod.type == 'BOOLEAN' and mod.object:
+                    cutter = mod.object
+                    # Skip cutter if it has set_static_bevel
+                    if cutter.get("set_static_bevel", False):
+                        continue
+                    
+                    for cutter_mod in cutter.modifiers:
+                        if cutter_mod.type == 'BEVEL':
+                            if cutter not in bevel_backup:
+                                bevel_backup[cutter] = {}
+                            if cutter_mod.name not in bevel_backup[cutter]:
+                                bevel_backup[cutter][cutter_mod.name] = cutter_mod.segments
+                            cutter_mod.segments = 1
+        
+        return bevel_backup
+
+    def restore_bevels(self, bevel_backup):
+        """Restore bevel segments from backup."""
+        for obj, mods in bevel_backup.items():
+            for mod_name, segments in mods.items():
+                if mod_name in obj.modifiers:
+                    obj.modifiers[mod_name].segments = segments
+
+    def extract_evaluated_geometry(self, context, source_objects):
+        """Extract all evaluated geometry from source objects using depsgraph.
+        Returns combined bmesh and list of collected materials."""
+        
+        # Build set of source object names for matching
+        source_names = {obj.name for obj in source_objects}
+        
+        # Get fresh depsgraph
+        depsgraph = context.evaluated_depsgraph_get()
+        
+        # Combined bmesh for all geometry
+        combined_bm = bmesh.new()
+        collected_materials = []
+        material_index_map = {}  # material -> index in collected_materials
+        
+        instance_count = 0
+        
+        for instance in depsgraph.object_instances:
+            # Get the original object this instance belongs to
+            parent_obj = instance.parent if instance.parent else instance.object
+            
+            # Check if this instance belongs to one of our selected objects
+            belongs_to_selection = False
+            if instance.object.original.name in source_names:
+                belongs_to_selection = True
+            elif parent_obj and parent_obj.original.name in source_names:
+                belongs_to_selection = True
+            
+            if not belongs_to_selection:
+                continue
+            
+            # Skip non-mesh instances
+            obj = instance.object
+            if obj.type != 'MESH':
+                continue
+            
+            # Get evaluated mesh data using new_from_object (safer than to_mesh)
+            try:
+                mesh_eval = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+            except:
+                continue
+            
+            if mesh_eval is None or len(mesh_eval.vertices) == 0:
+                bpy.data.meshes.remove(mesh_eval)
+                continue
+            
+            instance_count += 1
+            
+            # Get the instance's world matrix
+            matrix = instance.matrix_world.copy()
+            
+            # Collect materials from this mesh
+            for mat_slot in mesh_eval.materials:
+                if mat_slot and mat_slot not in material_index_map:
+                    material_index_map[mat_slot] = len(collected_materials)
+                    collected_materials.append(mat_slot)
+            
+            # Create temp bmesh, transform, and merge into combined
+            temp_bm = bmesh.new()
+            temp_bm.from_mesh(mesh_eval)
+            temp_bm.transform(matrix)
+            
+            # Remap material indices
+            for face in temp_bm.faces:
+                if face.material_index < len(mesh_eval.materials):
+                    mat = mesh_eval.materials[face.material_index]
+                    if mat and mat in material_index_map:
+                        face.material_index = material_index_map[mat]
+                    else:
+                        face.material_index = 0
+            
+            # Convert to temp mesh and merge into combined bmesh
+            if temp_bm.faces:
+                merge_mesh = bpy.data.meshes.new("_merge_temp")
+                temp_bm.to_mesh(merge_mesh)
+                combined_bm.from_mesh(merge_mesh)
+                bpy.data.meshes.remove(merge_mesh)
+            
+            temp_bm.free()
+            bpy.data.meshes.remove(mesh_eval)
+        
+        return combined_bm, collected_materials, instance_count
+
     def execute(self, context):
         scn = context.scene
-        selected = context.selected_objects
+        selected = context.selected_objects[:]  # Copy list
         
         if len(selected) == 0:
             self.report({'ERROR'}, "Nothing selected")
@@ -585,10 +743,10 @@ class DarrowGenerateLODs(bpy.types.Operator):
                 self.report({'ERROR'}, "Empty has no valid mesh children (check render visibility and boolean cutters)")
                 return {'CANCELLED'}
         else:
-            # Check for mesh selection
+            # Check for mesh selection (including convertible types like curves)
             mesh_count = 0
             for obj in selected:
-                if obj.type == 'MESH' and not self.should_skip_object(obj):
+                if (obj.type == 'MESH' or self.is_convertible_to_mesh(obj)) and not self.should_skip_object(obj):
                     source_meshes.append(obj)
                     mesh_count += 1
             
@@ -616,7 +774,7 @@ class DarrowGenerateLODs(bpy.types.Operator):
         if lod_collection_name in bpy.data.collections:
             # Remove existing LOD collection
             old_col = bpy.data.collections[lod_collection_name]
-            for obj in old_col.objects:
+            for obj in list(old_col.objects):
                 bpy.data.objects.remove(obj, do_unlink=True)
             bpy.data.collections.remove(old_col)
         
@@ -624,127 +782,93 @@ class DarrowGenerateLODs(bpy.types.Operator):
         bpy.context.scene.collection.children.link(lod_collection)
         lod_collection.color_tag = 'COLOR_04'
         
-        # Store original selection state
-        original_active = context.view_layer.objects.active
+        # Deselect all objects without using operators
+        for obj in context.selected_objects:
+            obj.select_set(False)
         
-        # Deselect all
-        bpy.ops.object.select_all(action='DESELECT')
+        # === DEPSGRAPH-BASED LOD0 GENERATION ===
         
-        # Select source meshes for joining
-        for obj in source_meshes:
-            obj.select_set(True)
-        context.view_layer.objects.active = source_meshes[0]
+        # Smart Un-Bevel: temporarily reduce bevel segments on ORIGINAL objects
+        # DISABLED - modifying source objects can corrupt depsgraph
+        bevel_backup = {}
+        # if scn.lodSmartUnbevel:
+        #     bevel_backup = self.backup_and_reduce_bevels(source_meshes)
         
-        # Duplicate and join for LOD0
-        bpy.ops.object.duplicate()
-        duplicates = context.selected_objects
+        # Extract evaluated geometry from depsgraph (captures geo nodes, booleans, etc.)
+        combined_bm, collected_materials, instance_count = self.extract_evaluated_geometry(context, source_meshes)
         
-        # Smart Un-Bevel: reduce all bevel segments to 1 (including on boolean cutters)
-        # Skip objects with set_static_bevel custom property
-        cutter_bevel_backup = {}  # Store original bevel segments for cutters
-        if scn.lodSmartUnbevel:
-            for obj in duplicates:
-                # Skip if object has set_static_bevel
-                if obj.get("set_static_bevel", False):
-                    continue
-                for mod in obj.modifiers:
-                    if mod.type == 'BEVEL':
-                        mod.segments = 1
-                    # Also handle boolean cutters
-                    if mod.type == 'BOOLEAN' and mod.object:
-                        cutter = mod.object
-                        # Skip cutter if it has set_static_bevel
-                        if cutter.get("set_static_bevel", False):
-                            continue
-                        if cutter not in cutter_bevel_backup:
-                            cutter_bevel_backup[cutter] = {}
-                        for cutter_mod in cutter.modifiers:
-                            if cutter_mod.type == 'BEVEL':
-                                # Backup original segments
-                                if cutter_mod.name not in cutter_bevel_backup[cutter]:
-                                    cutter_bevel_backup[cutter][cutter_mod.name] = cutter_mod.segments
-                                cutter_mod.segments = 1
+        # Restore original bevel segments
+        # if bevel_backup:
+        #     self.restore_bevels(bevel_backup)
         
-        # Apply modifiers if requested
-        if scn.lodApplyModifiers:
-            for obj in duplicates:
-                context.view_layer.objects.active = obj
-                for mod in obj.modifiers[:]:
-                    try:
-                        bpy.ops.object.modifier_apply(modifier=mod.name)
-                    except:
-                        pass
+        if instance_count == 0 or not combined_bm.faces:
+            combined_bm.free()
+            self.report({'ERROR'}, "No geometry could be extracted from selection")
+            return {'CANCELLED'}
         
-        # Restore cutter bevel segments
-        for cutter, mods in cutter_bevel_backup.items():
-            for mod_name, segments in mods.items():
-                if mod_name in cutter.modifiers:
-                    cutter.modifiers[mod_name].segments = segments
+        # Create LOD0 mesh from combined bmesh
+        lod0_mesh = bpy.data.meshes.new(f"{base_name}_LOD0")
+        combined_bm.to_mesh(lod0_mesh)
+        combined_bm.free()
         
-        # Join duplicates into LOD0
-        if len(duplicates) > 1:
-            context.view_layer.objects.active = duplicates[0]
-            bpy.ops.object.join()
+        # Add materials to mesh
+        for mat in collected_materials:
+            lod0_mesh.materials.append(mat)
         
-        lod0 = context.active_object
-        lod0.name = f"{base_name}_LOD0"
-        lod0.data.name = f"{base_name}_LOD0"
-        
-        # Move LOD0 to LOD collection
-        for col in lod0.users_collection:
-            col.objects.unlink(lod0)
+        # Create LOD0 object
+        lod0 = bpy.data.objects.new(f"{base_name}_LOD0", lod0_mesh)
         lod_collection.objects.link(lod0)
         
-        # Clear parent
-        lod0.parent = None
-        lod0.matrix_world = lod0.matrix_world
-        
-        # Triangulate if requested
+        # Triangulate if requested (using bmesh)
         if scn.lodTriangulate:
-            context.view_layer.objects.active = lod0
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_all(action='SELECT')
-            bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
-            bpy.ops.object.mode_set(mode='OBJECT')
+            bm = bmesh.new()
+            bm.from_mesh(lod0.data)
+            bmesh.ops.triangulate(bm, faces=bm.faces[:])
+            bm.to_mesh(lod0.data)
+            bm.free()
+            lod0.data.update()
         
         # Generate intermediate LODs
         lod_count = scn.lodCount
         lods_created = [lod0]
         
-        # Get ratios from scene properties (shown dynamically in panel)
+        # Get ratios from scene properties
         lod_ratios = [1.0, scn.lodRatio1, scn.lodRatio2, scn.lodRatio3, scn.lodRatio4, scn.lodRatio5]
         
         for i in range(1, lod_count - 1):
-            # Use ratio from scene properties
             ratio = lod_ratios[i] if i < len(lod_ratios) else 0.05
-            ratio = max(0.01, ratio)  # Minimum 1%
+            ratio = max(0.01, ratio)
             
-            # Duplicate LOD0 for this LOD level
-            bpy.ops.object.select_all(action='DESELECT')
-            lod0.select_set(True)
-            context.view_layer.objects.active = lod0
-            bpy.ops.object.duplicate()
+            # Create decimated LOD mesh directly
+            lod_mesh = lod0.data.copy()
+            lod_mesh.name = f"{base_name}_LOD{i}_temp"
             
-            lod_n = context.active_object
-            lod_n.name = f"{base_name}_LOD{i}"
-            lod_n.data = lod_n.data.copy()  # Make unique mesh data
-            lod_n.data.name = f"{base_name}_LOD{i}"
+            # Create temp object for decimation
+            temp_obj = bpy.data.objects.new("_temp_decimate", lod_mesh)
+            context.scene.collection.objects.link(temp_obj)
             
             # Add decimate modifier
-            decimate = lod_n.modifiers.new(name="LOD_Decimate", type='DECIMATE')
+            decimate = temp_obj.modifiers.new(name="LOD_Decimate", type='DECIMATE')
             decimate.decimate_type = 'COLLAPSE'
             decimate.ratio = ratio
             if scn.lodPreserveUVs:
                 decimate.use_collapse_triangulate = False
             
-            # Apply modifier
-            context.view_layer.objects.active = lod_n
-            bpy.ops.object.modifier_apply(modifier="LOD_Decimate")
+            # Get evaluated mesh through depsgraph
+            depsgraph = context.evaluated_depsgraph_get()
             
-            # Move to LOD collection
-            for col in lod_n.users_collection:
-                col.objects.unlink(lod_n)
+            # Create final mesh from evaluated object
+            final_mesh = bpy.data.meshes.new_from_object(temp_obj.evaluated_get(depsgraph))
+            final_mesh.name = f"{base_name}_LOD{i}"
+            
+            # Create the actual LOD object with the final mesh
+            lod_n = bpy.data.objects.new(f"{base_name}_LOD{i}", final_mesh)
             lod_collection.objects.link(lod_n)
+            
+            # Remove temp object from scene
+            context.scene.collection.objects.unlink(temp_obj)
+            bpy.data.objects.remove(temp_obj)
+            bpy.data.meshes.remove(lod_mesh)
             
             lods_created.append(lod_n)
         
@@ -753,56 +877,62 @@ class DarrowGenerateLODs(bpy.types.Operator):
         
         if scn.lodFinalType == 'BBOX':
             final_lod = self.create_bounding_box(lod0, final_lod_name)
-        else:  # CONVEX
+        else:
             final_lod = self.create_convex_hull(lod0, final_lod_name)
         
-        # Link final LOD to collection
         lod_collection.objects.link(final_lod)
         
         # Copy materials if requested
         if scn.lodKeepMaterials and lod0.data.materials:
             for mat in lod0.data.materials:
-                if mat and mat.name not in [m.name for m in final_lod.data.materials if m]:
+                if mat:
                     final_lod.data.materials.append(mat)
         
         lods_created.append(final_lod)
         
-        # Copy materials to all LODs if requested
+        # Copy materials to intermediate LODs
         if scn.lodKeepMaterials:
-            for lod in lods_created[1:]:  # Skip LOD0, it already has materials
-                if lod != final_lod:  # Skip final, handled above
-                    lod.data.materials.clear()
-                    for mat in lod0.data.materials:
-                        lod.data.materials.append(mat)
+            for lod in lods_created[1:-1]:
+                lod.data.materials.clear()
+                for mat in lod0.data.materials:
+                    lod.data.materials.append(mat)
         
-        # Add Weighted Normal and Smooth by Angle modifiers to all LODs (if Shade Smooth enabled)
-        if scn.lodShadeSmooth:
+        # Apply smooth shading using shade_auto_smooth operator
+        # Check property with explicit True default (handles uninitialized state)
+        try:
+            shade_smooth_enabled = scn.lodShadeSmooth
+        except:
+            shade_smooth_enabled = True
+        
+        print(f"DEBUG: lodShadeSmooth = {shade_smooth_enabled}, lods_created count = {len(lods_created)}")
+        
+        if shade_smooth_enabled:
             for lod in lods_created:
-                if lod.type == 'MESH':
+                if lod and lod.type == 'MESH' and lod.data:
+                    print(f"DEBUG: Applying shade_auto_smooth to {lod.name}")
+                    # Select only this LOD
                     bpy.ops.object.select_all(action='DESELECT')
                     lod.select_set(True)
                     context.view_layer.objects.active = lod
                     
-                    # Clear all sharp edges first
-                    #bm = bmesh.new()
-                    #bm.from_mesh(lod.data)
-                    #for edge in bm.edges:
-                    #    edge.smooth = True  # Clear sharp (smooth = True means NOT sharp)
-                    #bm.to_mesh(lod.data)
-                    #bm.free()
-                    #lod.data.update()
+                    # Merge by distance (remove doubles) using bmesh
+                    bm = bmesh.new()
+                    bm.from_mesh(lod.data)
+                    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0001)
+                    bm.to_mesh(lod.data)
+                    bm.free()
+                    lod.data.update()
                     
-                    # Apply auto smooth shading (Blender 5.0)
+                    # Apply auto smooth shading
                     bpy.ops.object.shade_auto_smooth()
                     
                     # Add Weighted Normal modifier
-                    if not any(mod.type == 'WEIGHTED_NORMAL' for mod in lod.modifiers):
-                        weighted_normal = lod.modifiers.new(name="Weighted Normal", type='WEIGHTED_NORMAL')
-                        weighted_normal.mode = "CORNER_ANGLE"
-                        weighted_normal.keep_sharp = True
+                    wn = lod.modifiers.new(name="Weighted Normal", type='WEIGHTED_NORMAL')
+                    wn.mode = 'CORNER_ANGLE'
+                    wn.keep_sharp = True
+                    print(f"DEBUG: Added Weighted Normal to {lod.name}")
         
-        # Select all created LODs
-        bpy.ops.object.select_all(action='DESELECT')
+        # Select created LODs (direct API, no operators)
         for lod in lods_created:
             lod.select_set(True)
         context.view_layer.objects.active = lods_created[0]
