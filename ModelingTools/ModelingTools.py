@@ -27,6 +27,33 @@ import bmesh
 import mathutils
 from bpy.types import Menu
 
+#-----------------------------------------------------#  
+#   UV Palette PropertyGroup
+#-----------------------------------------------------#
+class DarrowUVEntry(bpy.types.PropertyGroup):
+    """Property group for storing UV coordinate pairs"""
+    u: bpy.props.FloatProperty(
+        name="U",
+        description="U coordinate",
+        default=0.5,
+        precision=4
+    )
+    v: bpy.props.FloatProperty(
+        name="V",
+        description="V coordinate",
+        default=0.5,
+        precision=4
+    )
+    name: bpy.props.StringProperty(
+        name="Name",
+        default="UV"
+    )
+    note: bpy.props.StringProperty(
+        name="Label",
+        description="Custom label stored with this UV entry",
+        default=""
+    )
+
 class DarrowToolPanel:
     bl_category = "DarrowToolkit"
     bl_space_type = "VIEW_3D"
@@ -238,6 +265,50 @@ class DARROW_PT_toolPanel_4(DarrowToolPanel, bpy.types.Panel):
                 split_seam.enabled = False
                 unwrap.enabled = False
 
+#-----------------------------------------------------#  
+#   UV Palette UIList and Panel
+#-----------------------------------------------------#
+class DARROW_UL_uv_palette(bpy.types.UIList):
+    """UIList for UV palette entries"""
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(item, "note", text="")
+            row.prop(item, "u", text="U")
+            row.prop(item, "v", text="V")
+            row.separator()
+            op_grab = row.operator("uv_palette.grab", text="", icon="EYEDROPPER")
+            op_grab.index = index
+            op_set = row.operator("uv_palette.set", text="", icon="CHECKMARK")
+            op_set.index = index
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='UV')
+
+class DARROW_PT_toolPanel_UV_Palette(DarrowToolPanel, bpy.types.Panel):
+    bl_parent_id = "DARROW_PT_toolExtendPanel"
+    bl_label = "UV Palette"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        scn = context.scene
+        
+        row = layout.row()
+        row.template_list(
+            "DARROW_UL_uv_palette", "",
+            scn, "darrow_uv_palette",
+            scn, "darrow_uv_palette_index",
+            rows=3
+        )
+        
+        col = row.column(align=True)
+        col.operator("uv_palette.add", icon='ADD', text="")
+        col.operator("uv_palette.remove", icon='REMOVE', text="")
+        col.separator()
+        col.operator("uv_palette.move", icon='TRIA_UP', text="").direction = 'UP'
+        col.operator("uv_palette.move", icon='TRIA_DOWN', text="").direction = 'DOWN'
+
 class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
     bl_label = "Vertex Color"
@@ -341,10 +412,13 @@ class DARROW_PT_toolPanel_8(DarrowToolPanel, bpy.types.Panel):
         btn2.operator('darrow.set_static_bevel', text="Set static_bevel", icon="MOD_BEVEL")
         btn3 = col.row(align=True)
         btn3.operator('darrow.set_cull_out', text="Set cull_out", icon="GHOST_DISABLED")
+        btn4 = col.row(align=True)
+        btn4.operator('darrow.set_keep_as_is', text="Set keep_as_is", icon="PINNED")
         if len(objs) == 0:
             btn.enabled = False
             btn2.enabled = False
             btn3.enabled = False
+            btn4.enabled = False
 
 class DarrowSetIsCutter(bpy.types.Operator):
     bl_idname = "darrow.set_is_cutter"
@@ -392,6 +466,25 @@ class DarrowSetCullOut(bpy.types.Operator):
         for obj in objs:
             obj["cull_out"] = True
         self.report({'INFO'}, f"Set 'cull_out' on {len(objs)} object(s)")
+        return {'FINISHED'}
+
+class DarrowSetKeepAsIs(bpy.types.Operator):
+    bl_idname = "darrow.set_keep_as_is"
+    bl_label = "Set keep_as_is"
+    bl_description = "Mark objects to be included in all LODs without decimation"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        objs = context.selected_objects
+        print(f"DEBUG set_keep_as_is: {len(objs)} objects selected")
+        if len(objs) == 0:
+            self.report({'WARNING'}, "No objects selected")
+            return {'CANCELLED'}
+        for obj in objs:
+            obj["keep_as_is"] = True
+            print(f"DEBUG: Set keep_as_is=True on '{obj.name}'")
+        self.report({'INFO'}, f"Set 'keep_as_is' on {len(objs)} object(s)")
+        return {'FINISHED'}
         return {'FINISHED'}
 
 #-----------------------------------------------------#  
@@ -709,12 +802,91 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     mod.show_viewport = state['show_viewport']
                     mod.show_render = state['show_render']
 
-    def extract_evaluated_geometry(self, context, source_objects):
+    def source_has_cutter_faces(self, context, source_objects):
+        """Return True if any evaluated source mesh carries an 'is_cutter' FACE
+        boolean attribute. The attribute is added by geometry-nodes tools, so we
+        must inspect evaluated (not original) meshes."""
+        depsgraph = context.evaluated_depsgraph_get()
+        for obj in source_objects:
+            if obj.type != 'MESH':
+                continue
+            try:
+                mesh_eval = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+            except Exception:
+                continue
+            if mesh_eval is None:
+                continue
+            attr = mesh_eval.attributes.get("is_cutter")
+            found = attr is not None and attr.domain == 'FACE' and attr.data_type == 'BOOLEAN'
+            bpy.data.meshes.remove(mesh_eval)
+            if found:
+                return True
+        return False
+
+    def cull_cutter_faces_bm(self, bm, mesh_eval, fill_holes=True):
+        """Delete faces carrying the 'is_cutter' FACE boolean attribute from bm.
+
+        bm must have been built via `from_mesh(mesh_eval)` so its face order is
+        1:1 with mesh_eval's polygons. This is the mesh-level equivalent of the
+        object-level `is_cutter` custom property: geometry-nodes tools (e.g. the
+        VentGrille) tag hole-wall faces with `is_cutter=True`, so LOD1+ can drop
+        them here even though there is no separate cutter object.
+
+        If fill_holes is True, the openings left behind are capped so the surface
+        stays solid at distance instead of showing through-holes. Returns the
+        number of faces removed."""
+        attrs = getattr(mesh_eval, "attributes", None)
+        attr = attrs.get("is_cutter") if attrs else None
+        if attr is None or attr.domain != 'FACE' or attr.data_type != 'BOOLEAN':
+            return 0
+
+        bm.faces.ensure_lookup_table()
+        face_count = len(bm.faces)
+        cutter_faces = [bm.faces[i] for i, d in enumerate(attr.data)
+                        if d.value and i < face_count]
+        if not cutter_faces:
+            return 0
+
+        removed = len(cutter_faces)
+
+        # Remember verts touching the cut region so we only cap those openings
+        # (and never accidentally fill unrelated boundaries elsewhere).
+        region_verts = set()
+        for f in cutter_faces:
+            region_verts.update(f.verts)
+
+        bmesh.ops.delete(bm, geom=cutter_faces, context='FACES')
+
+        if fill_holes:
+            bm.edges.ensure_lookup_table()
+            region_boundary = lambda: [e for e in bm.edges
+                                       if len(e.link_faces) == 1
+                                       and e.verts[0] in region_verts
+                                       and e.verts[1] in region_verts]
+            boundary = region_boundary()
+            if boundary:
+                # First pass caps clean loops; contextual_create closes anything
+                # holes_fill leaves open (tight/rounded loops, adjacent holes).
+                bmesh.ops.holes_fill(bm, edges=boundary, sides=0)
+                bm.edges.ensure_lookup_table()
+                leftover = region_boundary()
+                if leftover:
+                    bmesh.ops.contextual_create(bm, geom=leftover)
+
+        return removed
+
+    def extract_evaluated_geometry(self, context, source_objects, exclude_keep_as_is=False, cull_cutter=False):
         """Extract all evaluated geometry from source objects using depsgraph.
-        Returns combined bmesh and list of collected materials."""
+        Returns combined bmesh and list of collected materials.
+        If exclude_keep_as_is=True, skips objects with keep_as_is property.
+        If cull_cutter=True, deletes faces tagged with the 'is_cutter' FACE
+        attribute (used by LOD1+ so baked-in holes get culled out)."""
         
         # Build set of source object names for matching
         source_names = {obj.name for obj in source_objects}
+        
+        # Build set of keep_as_is object names
+        keep_as_is_names = {obj.name for obj in source_objects if obj.get("keep_as_is", False)}
         
         # Get fresh depsgraph
         depsgraph = context.evaluated_depsgraph_get()
@@ -732,12 +904,18 @@ class DarrowGenerateLODs(bpy.types.Operator):
             
             # Check if this instance belongs to one of our selected objects
             belongs_to_selection = False
-            if instance.object.original.name in source_names:
+            original_name = instance.object.original.name
+            if original_name in source_names:
                 belongs_to_selection = True
             elif parent_obj and parent_obj.original.name in source_names:
                 belongs_to_selection = True
+                original_name = parent_obj.original.name
             
             if not belongs_to_selection:
+                continue
+            
+            # Skip keep_as_is objects if requested
+            if exclude_keep_as_is and original_name in keep_as_is_names:
                 continue
             
             # Skip non-mesh instances
@@ -769,8 +947,14 @@ class DarrowGenerateLODs(bpy.types.Operator):
             # Create temp bmesh, transform, and merge into combined
             temp_bm = bmesh.new()
             temp_bm.from_mesh(mesh_eval)
+
+            # Drop is_cutter-tagged faces (baked-in holes) for LOD1+.
+            # Done before transform so face indices still align with mesh_eval.
+            if cull_cutter:
+                self.cull_cutter_faces_bm(temp_bm, mesh_eval)
+
             temp_bm.transform(matrix)
-            
+
             # Remap material indices
             for face in temp_bm.faces:
                 if face.material_index < len(mesh_eval.materials):
@@ -903,20 +1087,31 @@ class DarrowGenerateLODs(bpy.types.Operator):
         # Filter out cull_out objects for LOD1+ source
         lod1_source_meshes = [obj for obj in source_meshes if not obj.get("cull_out", False)]
         
+        # DEBUG: Print all source meshes and their keep_as_is status
+        print(f"DEBUG source_meshes: {[obj.name for obj in source_meshes]}")
+        for obj in source_meshes:
+            kai = obj.get("keep_as_is", False)
+            print(f"  '{obj.name}' keep_as_is={kai} (type={type(kai).__name__})")
+        
         # Backup and modify bevels
         bevel_backup = self.backup_and_reduce_bevels(lod1_source_meshes, disable_completely=scn.lodSmartUnbevel)
         
         # Backup and disable boolean modifiers that reference cull_out objects
         bool_backup = self.backup_and_disable_cull_out_booleans(lod1_source_meshes)
         
-        # Check if we need to create a separate LOD1 base (bevels modified OR cull_out objects exist)
-        needs_separate_lod1_base = bevel_backup or bool_backup or len(lod1_source_meshes) < len(source_meshes)
+        # Detect baked-in cutter faces (is_cutter FACE attr) so a lone grille with
+        # no bevels/cull_out still gets a separate, hole-culled LOD1+ base.
+        has_cutter_faces = self.source_has_cutter_faces(context, lod1_source_meshes)
+
+        # Check if we need to create a separate LOD1 base (bevels modified OR
+        # cull_out objects exist OR baked-in cutter faces need culling)
+        needs_separate_lod1_base = bevel_backup or bool_backup or has_cutter_faces or len(lod1_source_meshes) < len(source_meshes)
         
         if needs_separate_lod1_base:
             if bevel_backup or bool_backup:
                 context.view_layer.update()
             
-            lod1_bm, _, _ = self.extract_evaluated_geometry(context, lod1_source_meshes)
+            lod1_bm, _, _ = self.extract_evaluated_geometry(context, lod1_source_meshes, exclude_keep_as_is=False, cull_cutter=True)
             
             # Restore modifiers
             if bevel_backup:
@@ -942,6 +1137,75 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     bm.free()
             else:
                 lod1_bm.free()
+        
+        # === KEEP_AS_IS GEOMETRY HANDLING ===
+        # Objects with keep_as_is should NOT be decimated, but included in all LODs
+        print(f"DEBUG lod1_source_meshes: {[obj.name for obj in lod1_source_meshes]}")
+        for obj in lod1_source_meshes:
+            kai = obj.get("keep_as_is", False)
+            print(f"  '{obj.name}' keep_as_is={kai}")
+        
+        keep_as_is_objs = [obj for obj in lod1_source_meshes if obj.get("keep_as_is", False)]
+        decimatable_objs = [obj for obj in lod1_source_meshes if not obj.get("keep_as_is", False)]
+        keep_as_is_mesh = None
+        
+        print(f"DEBUG keep_as_is: {len(keep_as_is_objs)} keep_as_is objects, {len(decimatable_objs)} decimatable objects")
+        
+        if keep_as_is_objs:
+            # Extract keep_as_is geometry (will be merged into each LOD unchanged)
+            bevel_backup_kai = self.backup_and_reduce_bevels(keep_as_is_objs, disable_completely=scn.lodSmartUnbevel)
+            if bevel_backup_kai:
+                context.view_layer.update()
+            
+            kai_bm, kai_materials, kai_count = self.extract_evaluated_geometry(context, keep_as_is_objs, exclude_keep_as_is=False)
+            print(f"DEBUG keep_as_is: extracted {kai_count} instances, {len(kai_bm.faces) if kai_bm else 0} faces")
+            
+            if bevel_backup_kai:
+                self.restore_bevels(bevel_backup_kai)
+            
+            if kai_bm and kai_bm.faces:
+                keep_as_is_mesh = bpy.data.meshes.new(f"{base_name}_keep_as_is_temp")
+                kai_bm.to_mesh(keep_as_is_mesh)
+                for mat in kai_materials:
+                    if mat and mat not in keep_as_is_mesh.materials[:]:
+                        keep_as_is_mesh.materials.append(mat)
+                print(f"DEBUG keep_as_is: created mesh with {len(keep_as_is_mesh.vertices)} verts")
+            if kai_bm:
+                kai_bm.free()
+            
+            # Create a NEW decimation base that EXCLUDES keep_as_is objects
+            if decimatable_objs:
+                bevel_backup_dec = self.backup_and_reduce_bevels(decimatable_objs, disable_completely=scn.lodSmartUnbevel)
+                bool_backup_dec = self.backup_and_disable_cull_out_booleans(decimatable_objs)
+                if bevel_backup_dec or bool_backup_dec:
+                    context.view_layer.update()
+                
+                dec_bm, dec_materials, dec_count = self.extract_evaluated_geometry(context, decimatable_objs, exclude_keep_as_is=False, cull_cutter=True)
+                print(f"DEBUG decimatable: extracted {dec_count} instances, {len(dec_bm.faces) if dec_bm else 0} faces")
+                
+                if bevel_backup_dec:
+                    self.restore_bevels(bevel_backup_dec)
+                if bool_backup_dec:
+                    self.restore_cull_out_booleans(bool_backup_dec)
+                
+                if dec_bm and dec_bm.faces:
+                    # Replace lod1_base_mesh with decimatable-only version
+                    if lod1_base_mesh:
+                        bpy.data.meshes.remove(lod1_base_mesh)
+                    lod1_base_mesh = bpy.data.meshes.new(f"{base_name}_decimation_base_temp")
+                    dec_bm.to_mesh(lod1_base_mesh)
+                    for mat in dec_materials:
+                        if mat and mat not in lod1_base_mesh.materials[:]:
+                            lod1_base_mesh.materials.append(mat)
+                    print(f"DEBUG decimation base: created mesh with {len(lod1_base_mesh.vertices)} verts")
+                if dec_bm:
+                    dec_bm.free()
+            else:
+                # ALL objects are keep_as_is - create empty decimation base
+                print("DEBUG: All objects are keep_as_is, creating empty decimation base")
+                if lod1_base_mesh:
+                    bpy.data.meshes.remove(lod1_base_mesh)
+                lod1_base_mesh = bpy.data.meshes.new(f"{base_name}_empty_base")
         
         # Generate intermediate LODs
         lod_count = scn.lodCount
@@ -978,6 +1242,18 @@ class DarrowGenerateLODs(bpy.types.Operator):
             # Create final mesh from evaluated object
             final_mesh = bpy.data.meshes.new_from_object(temp_obj.evaluated_get(depsgraph))
             final_mesh.name = f"{base_name}_LOD{i}"
+            
+            print(f"DEBUG LOD{i}: decimated mesh has {len(final_mesh.vertices)} verts")
+            
+            # Merge keep_as_is geometry if present
+            if keep_as_is_mesh and len(keep_as_is_mesh.vertices) > 0:
+                print(f"DEBUG LOD{i}: merging {len(keep_as_is_mesh.vertices)} keep_as_is verts")
+                combined_bm = bmesh.new()
+                combined_bm.from_mesh(final_mesh)
+                combined_bm.from_mesh(keep_as_is_mesh)
+                combined_bm.to_mesh(final_mesh)
+                combined_bm.free()
+                print(f"DEBUG LOD{i}: after merge has {len(final_mesh.vertices)} verts")
             
             # Create the actual LOD object with the final mesh
             lod_n = bpy.data.objects.new(f"{base_name}_LOD{i}", final_mesh)
@@ -1068,6 +1344,30 @@ class DarrowGenerateLODs(bpy.types.Operator):
                     
                     print(f"DEBUG: Added modifier stack to {lod.name}")
         
+        # === CLEANUP EACH LOD MESH ===
+        # Call cleanup operation on each generated LOD
+        settings = context.preferences.addons[__package__].preferences
+        for lod in lods_created:
+            if lod and lod.type == 'MESH' and lod.data:
+                print(f"DEBUG: Cleaning up {lod.name}")
+                # Select only this LOD
+                bpy.ops.object.select_all(action='DESELECT')
+                lod.select_set(True)
+                context.view_layer.objects.active = lod
+                
+                # Enter edit mode and clean
+                bpy.ops.object.mode_set(mode='EDIT')
+                bpy.ops.mesh.select_all(action='SELECT')
+                bpy.ops.mesh.select_mode(use_extend=False, use_expand=False, type='VERT')
+                bpy.ops.mesh.remove_doubles(threshold=settings.removeDoublesAmount)
+                if bpy.context.scene.fixNgons:
+                    bpy.ops.mesh.quads_convert_to_tris(quad_method='BEAUTY', ngon_method='BEAUTY')
+                    bpy.ops.mesh.tris_convert_to_quads()
+                bpy.ops.mesh.delete_loose()
+                bpy.ops.object.mode_set(mode='OBJECT')
+                
+                print(f"DEBUG: Cleaned up {lod.name}")
+        
         # Select created LODs (direct API, no operators)
         for lod in lods_created:
             lod.select_set(True)
@@ -1076,6 +1376,10 @@ class DarrowGenerateLODs(bpy.types.Operator):
         # Cleanup temporary LOD1 base mesh if created
         if lod1_base_mesh:
             bpy.data.meshes.remove(lod1_base_mesh)
+        
+        # Cleanup temporary keep_as_is mesh if created
+        if keep_as_is_mesh:
+            bpy.data.meshes.remove(keep_as_is_mesh)
         
         self.report({'INFO'}, f"Generated {lod_count} LODs in '{lod_collection_name}'")
         return {'FINISHED'}
@@ -1293,6 +1597,185 @@ class DarrowSetDisplay(bpy.types.Operator):
             bpy.context.space_data.shading.color_type = 'MATERIAL'
 
         bpy.context.scene.vertexDisplayBool = Var_displayBool
+        return {'FINISHED'}
+
+#-----------------------------------------------------#  
+#   UV Palette Operators
+#-----------------------------------------------------#
+class DarrowUVPaletteAdd(bpy.types.Operator):
+    bl_idname = "uv_palette.add"
+    bl_label = "Add UV Entry"
+    bl_description = "Add a new UV coordinate entry to the palette"
+
+    def execute(self, context):
+        scn = context.scene
+        entry = scn.darrow_uv_palette.add()
+        entry.name = f"UV {len(scn.darrow_uv_palette)}"
+        scn.darrow_uv_palette_index = len(scn.darrow_uv_palette) - 1
+        return {'FINISHED'}
+
+class DarrowUVPaletteRemove(bpy.types.Operator):
+    bl_idname = "uv_palette.remove"
+    bl_label = "Remove UV Entry"
+    bl_description = "Remove the selected UV coordinate entry"
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.darrow_uv_palette) > 0
+
+    def execute(self, context):
+        scn = context.scene
+        idx = scn.darrow_uv_palette_index
+        scn.darrow_uv_palette.remove(idx)
+        scn.darrow_uv_palette_index = min(max(0, idx - 1), len(scn.darrow_uv_palette) - 1)
+        return {'FINISHED'}
+
+class DarrowUVPaletteMove(bpy.types.Operator):
+    bl_idname = "uv_palette.move"
+    bl_label = "Move UV Entry"
+    bl_description = "Move the selected UV entry up or down in the list"
+
+    direction: bpy.props.EnumProperty(
+        items=[('UP', "Up", ""), ('DOWN', "Down", "")]
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.darrow_uv_palette) > 1
+
+    def execute(self, context):
+        scn = context.scene
+        idx = scn.darrow_uv_palette_index
+        new_idx = idx + (-1 if self.direction == 'UP' else 1)
+
+        if new_idx < 0 or new_idx >= len(scn.darrow_uv_palette):
+            return {'CANCELLED'}
+
+        scn.darrow_uv_palette.move(idx, new_idx)
+        scn.darrow_uv_palette_index = new_idx
+        return {'FINISHED'}
+
+class DarrowUVPaletteGrab(bpy.types.Operator):
+    bl_idname = "uv_palette.grab"
+    bl_label = "Grab UV"
+    bl_description = "Grab average UV coordinates from selected vertices in UV editor"
+    
+    index: bpy.props.IntProperty(default=-1)
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return (obj is not None and 
+                obj.type == 'MESH' and 
+                obj.mode == 'EDIT' and
+                len(context.scene.darrow_uv_palette) > 0)
+
+    def execute(self, context):
+        scn = context.scene
+        idx = self.index if self.index >= 0 else scn.darrow_uv_palette_index
+        
+        if idx < 0 or idx >= len(scn.darrow_uv_palette):
+            self.report({'WARNING'}, "No UV entry selected")
+            return {'CANCELLED'}
+        
+        obj = context.active_object
+        me = obj.data
+        bm = bmesh.from_edit_mesh(me)
+        
+        uv_layer = bm.loops.layers.uv.verify()
+        
+        # Collect selected UV coordinates (uses vertex selection)
+        uv_coords = []
+        for face in bm.faces:
+            for loop in face.loops:
+                if loop.vert.select:
+                    uv_coords.append(loop[uv_layer].uv.copy())
+        
+        if not uv_coords:
+            self.report({'WARNING'}, "No UVs selected in UV editor")
+            return {'CANCELLED'}
+        
+        # Calculate average
+        avg_u = sum(uv.x for uv in uv_coords) / len(uv_coords)
+        avg_v = sum(uv.y for uv in uv_coords) / len(uv_coords)
+        
+        # Store in palette entry
+        entry = scn.darrow_uv_palette[idx]
+        entry.u = avg_u
+        entry.v = avg_v
+        
+        self.report({'INFO'}, f"Grabbed UV: {avg_u:.4f}, {avg_v:.4f}")
+        return {'FINISHED'}
+
+class DarrowUVPaletteSet(bpy.types.Operator):
+    bl_idname = "uv_palette.set"
+    bl_label = "Set UV"
+    bl_description = ("Apply stored UV coordinates across the selection. "
+                     "In Edit Mode applies to selected UVs of all objects in edit mode; "
+                     "in Object Mode applies to every UV of all selected objects")
+    bl_options = {"UNDO"}
+
+    index: bpy.props.IntProperty(default=-1)
+
+    @classmethod
+    def poll(cls, context):
+        return (len(context.scene.darrow_uv_palette) > 0 and
+                any(o.type == 'MESH' for o in context.selected_objects))
+
+    def execute(self, context):
+        scn = context.scene
+        idx = self.index if self.index >= 0 else scn.darrow_uv_palette_index
+
+        if idx < 0 or idx >= len(scn.darrow_uv_palette):
+            self.report({'WARNING'}, "No UV entry selected")
+            return {'CANCELLED'}
+
+        entry = scn.darrow_uv_palette[idx]
+        target_u = entry.u
+        target_v = entry.v
+
+        # Edit Mode: only selected UVs, across every object being edited.
+        # Object Mode: every UV of each selected object.
+        edit_mode = context.mode == 'EDIT_MESH'
+        if edit_mode:
+            objs = [o for o in context.objects_in_mode if o.type == 'MESH']
+        else:
+            objs = [o for o in context.selected_objects if o.type == 'MESH']
+
+        if not objs:
+            self.report({'WARNING'}, "No mesh objects selected")
+            return {'CANCELLED'}
+
+        count = 0
+        for obj in objs:
+            me = obj.data
+
+            if edit_mode:
+                bm = bmesh.from_edit_mesh(me)
+            else:
+                bm = bmesh.new()
+                bm.from_mesh(me)
+
+            uv_layer = bm.loops.layers.uv.verify()
+
+            for face in bm.faces:
+                for loop in face.loops:
+                    if not edit_mode or loop.vert.select:
+                        loop[uv_layer].uv = (target_u, target_v)
+                        count += 1
+
+            if edit_mode:
+                bmesh.update_edit_mesh(me)
+            else:
+                bm.to_mesh(me)
+                me.update()
+                bm.free()
+
+        if count == 0:
+            self.report({'WARNING'}, "No UVs to set")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Set {count} UV(s) to {target_u:.4f}, {target_v:.4f}")
         return {'FINISHED'}
 
 class DarrowCircleArray(bpy.types.Operator):
@@ -2163,8 +2646,8 @@ class ModelingToolsPopUpCallback(bpy.types.Operator):
 #-----------------------------------------------------#  
 #   Registration classes
 #-----------------------------------------------------#
-classes = ( DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4,DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowSetCullOut, DarrowGenerateLODs,
-           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay,DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
+classes = ( DarrowUVEntry, DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4, DARROW_UL_uv_palette, DARROW_PT_toolPanel_UV_Palette, DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowSetCullOut, DarrowSetKeepAsIs, DarrowGenerateLODs,
+           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay, DarrowUVPaletteAdd, DarrowUVPaletteRemove, DarrowUVPaletteMove, DarrowUVPaletteGrab, DarrowUVPaletteSet, DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
 
 addon_keymaps = []
 
@@ -2177,6 +2660,17 @@ def register():
 
     for cls in classes:
         bpy.utils.register_class(cls)
+
+    # UV Palette properties
+    bpy.types.Scene.darrow_uv_palette = bpy.props.CollectionProperty(
+        type=DarrowUVEntry,
+        name="UV Palette",
+        description="Collection of stored UV coordinates"
+    )
+    bpy.types.Scene.darrow_uv_palette_index = bpy.props.IntProperty(
+        name="UV Palette Index",
+        default=0
+    )
 
     bpy.types.Scene.sharp = bpy.props.BoolProperty(
         name="Mark Sharp",
@@ -2447,6 +2941,10 @@ def register():
 
 def unregister():
     bpy.types.VIEW3D_PT_transform_orientations.remove(extend_transfo_pop_up)
+    
+    # Remove UV Palette properties
+    del bpy.types.Scene.darrow_uv_palette
+    del bpy.types.Scene.darrow_uv_palette_index
     
     for cls in classes:
         bpy.utils.unregister_class(cls)
