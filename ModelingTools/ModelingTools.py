@@ -21,6 +21,8 @@
 #   Imports
 #-----------------------------------------------------# 
 import bpy
+import os
+import json
 import math
 import random
 import bmesh
@@ -53,6 +55,47 @@ class DarrowUVEntry(bpy.types.PropertyGroup):
         description="Custom label stored with this UV entry",
         default=""
     )
+
+#-----------------------------------------------------#
+#   UV Palette global file (save/load)
+#-----------------------------------------------------#
+def _uv_palette_filepath():
+    """Path to the global palette file in the addon's user config dir."""
+    config_dir = bpy.utils.user_resource('CONFIG', path="darrow_toolkit", create=True)
+    return os.path.join(config_dir, "uv_palette.json")
+
+def save_uv_palette(scn):
+    """Write the scene palette to the global JSON file. Returns entry count."""
+    entries = [
+        {"name": e.name, "note": e.note, "u": e.u, "v": e.v}
+        for e in scn.darrow_uv_palette
+    ]
+    with open(_uv_palette_filepath(), 'w', encoding='utf-8') as f:
+        json.dump(entries, f, indent=2)
+    return len(entries)
+
+def load_uv_palette(scn):
+    """Replace the scene palette with the contents of the global JSON file.
+    Returns entry count, or None if the file is missing/unreadable."""
+    path = _uv_palette_filepath()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            entries = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    scn.darrow_uv_palette.clear()
+    for data in entries:
+        entry = scn.darrow_uv_palette.add()
+        entry.name = data.get("name", "UV")
+        entry.note = data.get("note", "")
+        entry.u = data.get("u", 0.5)
+        entry.v = data.get("v", 0.5)
+    scn.darrow_uv_palette_index = min(
+        scn.darrow_uv_palette_index, max(0, len(scn.darrow_uv_palette) - 1))
+    return len(entries)
 
 class DarrowToolPanel:
     bl_category = "DarrowToolkit"
@@ -308,6 +351,10 @@ class DARROW_PT_toolPanel_UV_Palette(DarrowToolPanel, bpy.types.Panel):
         col.separator()
         col.operator("uv_palette.move", icon='TRIA_UP', text="").direction = 'UP'
         col.operator("uv_palette.move", icon='TRIA_DOWN', text="").direction = 'DOWN'
+
+        row = layout.row(align=True)
+        row.operator("uv_palette.save", icon='FILE_TICK', text="Save")
+        row.operator("uv_palette.load", icon='FILE_FOLDER', text="Load")
 
 class DARROW_PT_toolPanel_5(DarrowToolPanel, bpy.types.Panel):
     bl_parent_id = "DARROW_PT_toolExtendPanel"
@@ -1630,6 +1677,38 @@ class DarrowUVPaletteRemove(bpy.types.Operator):
         scn.darrow_uv_palette_index = min(max(0, idx - 1), len(scn.darrow_uv_palette) - 1)
         return {'FINISHED'}
 
+class DarrowUVPaletteSave(bpy.types.Operator):
+    bl_idname = "uv_palette.save"
+    bl_label = "Save Palette"
+    bl_description = "Save the current palette to the global palette file on disk"
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.darrow_uv_palette) > 0
+
+    def execute(self, context):
+        try:
+            count = save_uv_palette(context.scene)
+        except OSError as ex:
+            self.report({'ERROR'}, f"Could not save palette: {ex}")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Saved {count} UV entr{'y' if count == 1 else 'ies'}")
+        return {'FINISHED'}
+
+class DarrowUVPaletteLoad(bpy.types.Operator):
+    bl_idname = "uv_palette.load"
+    bl_label = "Load Palette"
+    bl_description = "Replace the current palette with the global palette file on disk"
+    bl_options = {"UNDO"}
+
+    def execute(self, context):
+        count = load_uv_palette(context.scene)
+        if count is None:
+            self.report({'WARNING'}, "No saved palette found")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Loaded {count} UV entr{'y' if count == 1 else 'ies'}")
+        return {'FINISHED'}
+
 class DarrowUVPaletteMove(bpy.types.Operator):
     bl_idname = "uv_palette.move"
     bl_label = "Move UV Entry"
@@ -1684,12 +1763,15 @@ class DarrowUVPaletteGrab(bpy.types.Operator):
         
         uv_layer = bm.loops.layers.uv.verify()
         
-        # Collect selected UV coordinates (uses vertex selection)
+        # Collect UV coordinates from selected faces only. Averaging by
+        # vertex selection alone pulls in loops from neighbouring faces that
+        # share those verts (often on other UV islands), skewing the result.
         uv_coords = []
         for face in bm.faces:
+            if not face.select:
+                continue
             for loop in face.loops:
-                if loop.vert.select:
-                    uv_coords.append(loop[uv_layer].uv.copy())
+                uv_coords.append(loop[uv_layer].uv.copy())
         
         if not uv_coords:
             self.report({'WARNING'}, "No UVs selected in UV editor")
@@ -1759,10 +1841,13 @@ class DarrowUVPaletteSet(bpy.types.Operator):
             uv_layer = bm.loops.layers.uv.verify()
 
             for face in bm.faces:
+                # In edit mode restrict to selected faces so shared verts of
+                # neighbouring faces don't get their UVs clobbered.
+                if edit_mode and not face.select:
+                    continue
                 for loop in face.loops:
-                    if not edit_mode or loop.vert.select:
-                        loop[uv_layer].uv = (target_u, target_v)
-                        count += 1
+                    loop[uv_layer].uv = (target_u, target_v)
+                    count += 1
 
             if edit_mode:
                 bmesh.update_edit_mesh(me)
@@ -2647,7 +2732,7 @@ class ModelingToolsPopUpCallback(bpy.types.Operator):
 #   Registration classes
 #-----------------------------------------------------#
 classes = ( DarrowUVEntry, DarrowClearSharp,DarrowClearUVs, DarrowClearSeam, DarrowCleanupMesh,DarrowSharp,createOrient,DARROW_PT_toolPanel,DARROW_PT_toolExtendPanel, DARROW_PT_toolPanel_2, DARROW_PT_toolPanel_3, DARROW_PT_toolPanel_4, DARROW_UL_uv_palette, DARROW_PT_toolPanel_UV_Palette, DARROW_PT_toolPanel_5, DARROW_PT_toolPanel_6,DARROW_PT_toolPanel_7, DARROW_PT_toolPanel_8, DARROW_PT_toolPanel_LOD, CTO_OT_Dummy, DarrowClearOrientation, DarrowSetOrigin, DarrowMoveOrigin, DarrowTransforms, DarrowNormals, DarrowSmooth, DarrowSetIsCutter, DarrowSetStaticBevel, DarrowSetCullOut, DarrowSetKeepAsIs, DarrowGenerateLODs,
-           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay, DarrowUVPaletteAdd, DarrowUVPaletteRemove, DarrowUVPaletteMove, DarrowUVPaletteGrab, DarrowUVPaletteSet, DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
+           DarrowCircleArray, DarrowClearSelected, DarrowSetBlack, DarrowSetWhite, DarrowSetRed, DarrowSetGreen, DarrowSetBlue, DarrowSetColor, DarrowSetDisplay, DarrowUVPaletteAdd, DarrowUVPaletteRemove, DarrowUVPaletteMove, DarrowUVPaletteSave, DarrowUVPaletteLoad, DarrowUVPaletteGrab, DarrowUVPaletteSet, DarrowUnwrapSelected,DarrowMoveOnGrid, DARROW_MT_modelingPie, ModelingToolsPopUpCallback)
 
 addon_keymaps = []
 
